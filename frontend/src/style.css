@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.is-token {
+  @apply rounded-full border-2 border-red-500;
+}
+
+.selected {
+  outline-width: 2px;
+  outline-style: solid;
+  @apply outline-sky-400;
+}
