@@ -1,0 +1,18 @@
+{
+  "scripts": {
+    "dev": "bun --watch server.ts",
+    "start": "bun run server.ts",
+    "build": "bun build server.ts --outdir ./dist",
+    "docker:build": "docker build -t barnabus-vtt-backend .",
+    "docker:run": "docker run -p 5000:5000 -p 8080:8080 barnabus-vtt-backend"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "ws": "^8.18.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.1",
+    "@types/ws": "^8.18.1"
+  }
+}
