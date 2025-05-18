@@ -1,9 +1,11 @@
+import type { Object } from "../../types";
 import { CLASSES } from "./config.svelte";
 import {
   createFreehandSvgElement,
   createImageElement,
   createTextElement,
 } from "./factories.svelte";
+import app from "./main";
 import {
   eMeasuringTool,
   ePenTool,
@@ -73,56 +75,58 @@ export let dom: {
   leftToolbarMenu: HTMLElement;
 };
 
-export const exportObject = (obj: HTMLElement) => {
+export const exportObject = (obj: HTMLElement): Object => {
   const type = obj.dataset.objtype;
 
-  if (type === "image") {
-    return {
-      id: obj.id,
-      type: "image",
-      src: obj.dataset.src,
-      x: obj.dataset.x,
-      y: obj.dataset.y,
-      width: obj.dataset.width,
-      height: obj.dataset.height,
-      isGrid: obj.dataset.isGrid === "true",
-    };
+  if (type !== "image" && type !== "text" && type !== "svg") {
+    throw new Error("Unknown object type");
   }
 
-  if (type === "text") {
-    return {
-      id: obj.id,
-      type: "text",
-      text: (obj as HTMLTextAreaElement).value,
-      x: obj.dataset.x,
-      y: obj.dataset.y,
-      width: obj.dataset.width,
-      height: obj.dataset.height,
-      fontSize: obj.dataset.fontSize,
-      color: obj.dataset.color,
-      backgroundColor: obj.dataset.backgroundColor,
-      scale: obj.dataset.scale,
-      isBold: obj.dataset.isBold === "true",
-      isItalic: obj.dataset.isItalic === "true",
-    };
-  }
-
-  if (type === "svg") {
-    return {
-      id: obj.id,
-      type: "svg",
-      pathValue: obj.children[0].getAttribute("d"),
-      x: obj.dataset.x,
-      y: obj.dataset.y,
-      width: obj.dataset.width,
-      height: obj.dataset.height,
-    };
+  switch (type) {
+    case "image":
+      return {
+        id: obj.id,
+        type: "image",
+        src: obj.dataset.src!,
+        x: Number(obj.dataset.x),
+        y: Number(obj.dataset.y),
+        width: Number(obj.dataset.width),
+        height: Number(obj.dataset.height),
+        isGrid: obj.dataset.isGrid === "true",
+      };
+    case "text":
+      return {
+        id: obj.id,
+        type: "text",
+        text: (obj as HTMLTextAreaElement).value,
+        x: Number(obj.dataset.x),
+        y: Number(obj.dataset.y),
+        width: Number(obj.dataset.width),
+        height: Number(obj.dataset.height),
+        fontSize: Number(obj.dataset.fontSize),
+        color: obj.dataset.color!,
+        backgroundColor: obj.dataset.backgroundColor!,
+        scale: Number(obj.dataset.scale),
+        isBold: obj.dataset.isBold === "true",
+        isItalic: obj.dataset.isItalic === "true",
+      };
+    case "svg":
+      return {
+        id: obj.id,
+        type: "svg",
+        pathValue: obj.children[0].getAttribute("d")!,
+        x: Number(obj.dataset.x),
+        y: Number(obj.dataset.y),
+        width: Number(obj.dataset.width),
+        height: Number(obj.dataset.height),
+      };
   }
 };
 
 export const importObject = (json: any) => {
   if (json.type === "image") {
     return createImageElement({
+      id: json.id || undefined,
       src: json.src,
       width: json.width,
       height: json.height,
@@ -219,4 +223,30 @@ export const loadDomIntoMemory = () => {
     popoverMenu: document.getElementById("popover-menu")!,
     leftToolbarMenu: document.getElementById("left-toolbar")!,
   };
+};
+
+export const updateObject = (obj: Object, isTransition: boolean) => {
+  const element = document.getElementById(obj.id);
+  if (!element) return;
+
+  if (isTransition) {
+    element.style.transition = `transform ${300}ms cubic-bezier(0.25, 0.1, 0.25, 1)`;
+  }
+
+  if (obj.type === "image") {
+    element.dataset.src = obj.src;
+    element.dataset.x = String(obj.x);
+    element.dataset.y = String(obj.y);
+    element.dataset.width = String(obj.width);
+    element.dataset.height = String(obj.height);
+    element.dataset.isGrid = String(obj.isGrid);
+    element.style.transform = `translate(${obj.x}px, ${obj.y}px)`;
+  }
+
+  if (isTransition) {
+    setTimeout(() => {
+      element.style.transition = "";
+    }, 300);
+    // now remove the transition
+  }
 };

@@ -21,6 +21,7 @@ import { deselectObjects } from "./interactions.svelte";
 import type { HTMLDivElementWithCustomFuncs } from "./types";
 
 export function createImageElement(args: {
+  id?: string;
   src: string;
   width: number;
   height: number;
@@ -28,7 +29,7 @@ export function createImageElement(args: {
   y: number;
   isGrid?: boolean;
 }) {
-  const { src, width, height, x, y, isGrid } = args;
+  let { id, src, width, height, x, y, isGrid } = args;
   appState.zIndexCounter++;
   const imageElement = document.createElement(
     "div"
@@ -37,7 +38,9 @@ export function createImageElement(args: {
   // const frontOfImage = document.createElement("div");
   // const backOfImage = document.createElement("div");
 
-  let id = nanoid(8);
+  if (id === undefined) {
+    id = nanoid(8);
+  }
 
   // do this again,but instead it should be a div object that has the background image as the src
   // might be faster?

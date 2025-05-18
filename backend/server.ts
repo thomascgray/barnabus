@@ -2,13 +2,15 @@ import { WebSocketServer } from "ws";
 var express = require("express");
 var cors = require("cors");
 var app = express();
-
+import * as Types from "../types";
+const fs = require("fs");
+const path = require("path");
 app.use(cors());
 
 const HTTP_PORT = 5000;
 const WS_PORT = 8080;
-const PING_INTERVAL = 3000; // 30 seconds between pings
-const PING_TIMEOUT = 1000; // 5 seconds to respond to a ping
+const PING_INTERVAL = 30000; // 30 seconds between pings
+const PING_TIMEOUT = 5000; // 5 seconds to respond to a ping
 
 app.get("/", function (req, res, next) {
   res.json({ msg: "this is a test!" });
@@ -24,91 +26,45 @@ const wss = new WebSocketServer({ port: WS_PORT });
 const sockets: { [id: string]: WebSocket } = {};
 const pendingPings: { [id: string]: NodeJS.Timeout } = {};
 
-const boardInformation: any = [
-  {
-    id: "mtzgcYBN",
-    type: "image",
-    src: "https://i.imgur.com/TYDA1VV.png",
-    x: "329.727",
-    y: "247.08",
-    width: "811",
-    height: "1056",
-    isGrid: false,
-  },
-];
+type BoardInformation = {
+  [id: string]: Types.Object;
+};
+let boardInformation: BoardInformation = {};
 
-type Identity = {
-  id: string;
-  name?: string;
+const writeBoardStateToFile = () => {
+  // Ensure data directory exists
+  const dataDir = path.join(__dirname, "data");
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+
+  const filePath = path.join(dataDir, "board.json");
+  fs.writeFileSync(filePath, JSON.stringify(boardInformation, null, 2));
 };
 
-type JoinPacket = {
-  type: "join";
-  identity: Identity;
+const readBoardStateFromFile = () => {
+  const filePath = path.join(__dirname, "data", "board.json");
+
+  // Check if file exists before trying to read it
+  if (!fs.existsSync(filePath)) {
+    // Return default or empty state if file doesn't exist
+    boardInformation = {};
+    return;
+  }
+
+  try {
+    const file = fs.readFileSync(filePath);
+    boardInformation = JSON.parse(file.toString());
+  } catch (error) {
+    console.error(`Error reading board state: ${error.message}`);
+    // Handle corrupted files by returning default state
+    boardInformation = {};
+  }
 };
 
-type JoinResponsePacket = {
-  type: "joinResponse";
-  identity: Identity;
-  payload: {
-    boardInformation: any;
-  };
-};
+readBoardStateFromFile();
 
-type DiceRollPacket = {
-  type: "diceRoll";
-  identity: Identity;
-  payload: any;
-};
-
-type PingPacket = {
-  type: "ping";
-  identity: Identity;
-};
-
-type PongPacket = {
-  type: "pong";
-  identity: Identity;
-};
-
-type ClosePacket = {
-  type: "close";
-  identity: Identity;
-};
-
-type AlterItemPacket = {
-  type: "alterItem";
-  identity: Identity;
-  payload: any;
-};
-
-type AddItemPacket = {
-  type: "addItem";
-  identity: Identity;
-  payload: {
-    object: any;
-  };
-};
-
-type Packet =
-  | JoinPacket
-  | JoinResponsePacket
-  | DiceRollPacket
-  | ClosePacket
-  | AlterItemPacket
-  | PingPacket
-  | PongPacket
-  | AddItemPacket;
-
-// setInterval(() => {
-//   console.log("---------------------debug tick---------------------");
-//   console.log("sockets");
-//   console.log(Object.keys(sockets));
-//   console.log(`${Object.keys(sockets).length} sockets`);
-//   console.log("----------------------------------------------------");
-// }, 3000);
-
-const onJoin = (webSocket: WebSocket, data: JoinPacket) => {
+const onJoin = (webSocket: WebSocket, data: Types.Packet_Join) => {
   sockets[data.identity.id] = webSocket as unknown as WebSocket;
   console.log("new client joined:", data.identity.id);
   webSocket.send(
@@ -130,17 +86,17 @@ const getSiblingSockets = (id: string) => {
   return siblingIds.map((id) => sockets[id]);
 };
 
-const onClose = (webSocket: WebSocket, data: ClosePacket) => {
+const onClose = (webSocket: WebSocket, data: Types.Packet_ConnectionClosed) => {
   console.log("client disconnected:", data.identity.id);
   removeClient(data.identity.id);
 };
 
-const onPing = (webSocket: WebSocket, data: PingPacket) => {
+const onPing = (webSocket: WebSocket, data: Types.Packet_Ping) => {
   // Client sent a ping, respond with the same packet
   webSocket.send(JSON.stringify(data));
 };
 
-const onPong = (webSocket: WebSocket, data: PongPacket) => {
+const onPong = (webSocket: WebSocket, data: Types.Packet_Pong) => {
   // Client responded to our ping, clear the timeout
   if (pendingPings[data.identity.id]) {
     clearTimeout(pendingPings[data.identity.id]);
@@ -156,7 +112,7 @@ const sendPingToClient = (clientId: string) => {
   console.log("sending ping to:", clientId);
 
   // Create ping packet
-  const pingPacket: PingPacket = {
+  const pingPacket: Types.Packet_Ping = {
     type: "ping",
     identity: { id: clientId },
   };
@@ -190,7 +146,10 @@ const removeClient = (clientId: string) => {
   }
 };
 
-const broadcastDiceRoll = (senderId: string, diceRollData: DiceRollPacket) => {
+const broadcastDiceRoll = (
+  senderId: string,
+  diceRollData: Types.Packet_DiceRoll
+) => {
   // Get all the sockets that AREN'T the sender
   const otherSocketsIds = Object.keys(sockets).filter((id) => id !== senderId);
 
@@ -202,22 +161,35 @@ const broadcastDiceRoll = (senderId: string, diceRollData: DiceRollPacket) => {
   });
 };
 
-const handleAlterItem = (webSocket: WebSocket, data: AlterItemPacket) => {
-  // Broadcast to all clients
-  Object.keys(sockets).forEach((id) => {
-    if (sockets[id]) {
-      sockets[id].send(JSON.stringify(data));
-    }
+const handleAlterItem = (
+  webSocket: WebSocket,
+  data: Types.Packet_AlterItem
+) => {
+  // we need to tell all the siblings which item has changed
+  // we also need to change the item in our own server boardstate
+  const siblings = getSiblingSockets(data.identity.id);
+  siblings.forEach((sibling) => {
+    console.log("data", data);
+    sibling.send(JSON.stringify(data));
   });
+
+  // update the board state
+  boardInformation[data.payload.object.id] = data.payload.object;
+
+  // then write the board state to the file
+  writeBoardStateToFile();
 };
 
-const handleAddItem = (webSocket: WebSocket, data: AddItemPacket) => {
+const handleAddItem = (webSocket: WebSocket, data: Types.Packet_AddItem) => {
   // Broadcast to all clients
   const siblings = getSiblingSockets(data.identity.id);
   siblings.forEach((sibling) => {
     console.log("data", data);
     sibling.send(JSON.stringify(data));
   });
+  // update the board state
+  boardInformation[data.payload.object.id] = data.payload.object;
+  writeBoardStateToFile();
 };
 
 // Set up a ping interval to check all clients periodically
@@ -241,7 +213,7 @@ setInterval(() => {
 wss.on("connection", function connection(ws) {
   ws.on("message", function message(data: string) {
     try {
-      const json: Packet = JSON.parse(data);
+      const json: Types.Packet = JSON.parse(data);
       console.log("received packet:", json.type, "from:", json.identity?.id);
 
       switch (json.type) {

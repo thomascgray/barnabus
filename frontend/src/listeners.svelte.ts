@@ -17,8 +17,6 @@ import {
 } from "webp-converter-browser";
 import { eTool } from "./types";
 
-import * as ConnectionManager from "./ConnectionManager.svelte";
-
 export const preMouseDown = (e: MouseEvent) => {
   appState.isLeftMouseButtonDown = e.button === 0;
   appState.isMiddleMouseButtonDown = e.button === 1;
@@ -262,62 +260,7 @@ export const mouse_UP = (e: MouseEvent) => {
   if (appState.isLeftMouseButtonDown && appState.currentTool === eTool.image) {
     // make sure nothing is selected
     Interactions.deselectObjects();
-
-    // ask for an image url
-    const imageUrl = prompt("Enter the image url");
-
-    if (imageUrl) {
-      try {
-        // if the image url is actually an image, then we can create an image element
-        // get the images original size
-        const image = new Image();
-        image.src = imageUrl;
-        image.onload = () => {
-          const width = image.width;
-          const height = image.height;
-
-          const spawnPoint = Utils.screenToCanvas(
-            e.clientX,
-            e.clientY,
-            Number(dom.camera.dataset.x),
-            Number(dom.camera.dataset.y),
-            Number(dom.camera.dataset.z)
-          );
-
-          // create a new image element
-          const domObj = createImageElement({
-            src: imageUrl,
-            width,
-            height,
-            x: spawnPoint.x - width / 2,
-            y: spawnPoint.y - height / 2,
-          });
-
-          const rawObj = exportObject(domObj);
-
-          console.log("rawObj", rawObj);
-
-          ConnectionManager.sendMessage({
-            type: "addItem",
-            identity: ConnectionManager.identity,
-            payload: {
-              object: rawObj,
-            },
-          });
-
-          Interactions.setActiveTool(eTool.cursor);
-        };
-        image.onerror = () => {
-          alert("Something went wrong trying to make the image");
-          Interactions.setActiveTool(eTool.cursor);
-        };
-      } catch (error) {
-        alert("Something went wrong trying to make the image");
-        Interactions.setActiveTool(eTool.cursor);
-      }
-    } else {
-      Interactions.setActiveTool(eTool.cursor);
-    }
+    Interactions.addImageViaUrlClicking(e);
     Interactions.endDraggingSelectionBoxDrag(e);
     return;
   }

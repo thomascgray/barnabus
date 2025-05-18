@@ -18,7 +18,10 @@
         // add the result to the top of the list
         rollResults.unshift(rollResult);
         inputVal = "";
-        sendMessage(rollResult);
+        sendMessage({
+          type: "diceRoll",
+          payload: rollResult,
+        });
         // remove the last result if we've reached 30
         if (rollResults.length > 30) {
           rollResults.pop();

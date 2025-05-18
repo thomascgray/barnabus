@@ -1,6 +1,6 @@
 import * as Utils from "./utils.svelte";
 import { appState, dom, exportObject, importObject } from "./global.svelte";
-
+import * as ConnectionManager from "./ConnectionManager.svelte";
 import { getStroke } from "perfect-freehand";
 import { CLASSES } from "./config.svelte";
 import {
@@ -11,6 +11,7 @@ import {
 import { toast } from "./toast.svelte";
 import {
   createFreehandSvgElement,
+  createImageElement,
   createTextElement,
 } from "./factories.svelte";
 import {
@@ -18,6 +19,7 @@ import {
   eTool,
   type HTMLDivElementWithCustomFuncs,
 } from "./types";
+import { nanoid } from "nanoid";
 
 let drawing_tlX = Infinity;
 let drawing_tlY = Infinity;
@@ -750,6 +752,15 @@ export const endDraggingObjects = (e: MouseEvent) => {
 
   // strictly speaking this gets handled when moving; but this is just in case
   calculateSelectedItemsBoundingBox();
+  for (let elem of appState.selectedObjects) {
+    ConnectionManager.sendMessage({
+      type: "alterItem",
+      payload: {
+        object: exportObject(elem),
+      },
+    });
+  }
+
   appState.isDraggingObjects = false;
 };
 
@@ -761,13 +772,13 @@ export const duplicateSelectedObjects = () => {
     const json = exportObject(el);
     const x = Number(el.dataset?.x || 0);
     const y = Number(el.dataset?.y || 0);
-    newObjects.push(
-      importObject({
-        ...json,
-        x: x + 80,
-        y: y + 100,
-      })
-    );
+    const newObject = {
+      ...json,
+      id: nanoid(8),
+      x: x + 80,
+      y: y + 100,
+    };
+    newObjects.push(importObject(newObject));
   });
 
   toast(
@@ -780,9 +791,17 @@ export const duplicateSelectedObjects = () => {
 
   selectObjects(newObjects);
 
-  // console.log("newObjects", newObjects);
-
   calculateSelectedItemsBoundingBox();
+
+  newObjects.forEach((obj) => {
+    console.log("obj", obj);
+    ConnectionManager.sendMessage({
+      type: "addItem",
+      payload: {
+        object: exportObject(obj),
+      },
+    });
+  });
 };
 
 export const toggleLock = () => {
@@ -861,4 +880,59 @@ export const endMeasuring = (e: MouseEvent) => {
   console.log("endMeasuring");
   appState.startMeasuringPoint = null;
   appState.currentMeasuringPoint = null;
+};
+
+export const addImageViaUrlClicking = (e: MouseEvent) => {
+  // ask for an image url
+  const imageUrl = prompt("Enter the image url");
+
+  if (imageUrl) {
+    try {
+      // if the image url is actually an image, then we can create an image element
+      // get the images original size
+      const image = new Image();
+      image.src = imageUrl;
+      image.onload = () => {
+        const width = image.width;
+        const height = image.height;
+
+        const spawnPoint = Utils.screenToCanvas(
+          e.clientX,
+          e.clientY,
+          Number(dom.camera.dataset.x),
+          Number(dom.camera.dataset.y),
+          Number(dom.camera.dataset.z)
+        );
+
+        // create a new image element
+        const domObj = createImageElement({
+          src: imageUrl,
+          width,
+          height,
+          x: spawnPoint.x - width / 2,
+          y: spawnPoint.y - height / 2,
+        });
+
+        const rawObj = exportObject(domObj);
+
+        ConnectionManager.sendMessage({
+          type: "addItem",
+          payload: {
+            object: rawObj,
+          },
+        });
+
+        setActiveTool(eTool.cursor);
+      };
+      image.onerror = () => {
+        alert("Something went wrong trying to make the image");
+        setActiveTool(eTool.cursor);
+      };
+    } catch (error) {
+      alert("Something went wrong trying to make the image");
+      setActiveTool(eTool.cursor);
+    }
+  } else {
+    setActiveTool(eTool.cursor);
+  }
 };
