@@ -17,12 +17,12 @@
 <div
   id="pen-toolbar-wrapper"
   class:hidden={appState.currentTool !== eTool.pencil}
-  class="absolute left-0 bottom-16 w-screen flex flex-row justify-center items-center space-x-2"
+  class="absolute left-0 bottom-16 w-screen flex flex-row justify-center items-center space-x-2 pointer-events-none"
 >
   <!-- pen toolbar 1 -->
   <div
     id="pen-toolbar"
-    class="p-2 mb-4 rounded-lg flex space-x-2 bg-slate-600 items-center"
+    class="p-2 mb-4 rounded-lg flex space-x-2 bg-slate-600 items-center pointer-events-auto"
   >
     <!-- different types of pen -->
     <div class="grid grid-cols-3 gap-2">

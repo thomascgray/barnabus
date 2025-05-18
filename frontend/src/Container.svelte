@@ -6,9 +6,9 @@
 </script>
 
 <div class="flex flex-col h-screen w-screen">
-  {#if ConnectionManager.cmState.connectionState === "connected"}
-    <App />
+  <App />
+  <!-- {#if ConnectionManager.cmState.connectionState === "connected"}
   {:else}
     <Landing />
-  {/if}
+  {/if} -->
 </div>
