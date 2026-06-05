@@ -28,6 +28,11 @@ front, `bun --watch` on the back).
   reworking rooms or auth. This is the main reason to build the abstraction now.
 - **Client remembers memberships.** The frontend persists, per joined board:
   `{ boardId, name, passphrase, username }` so you can hop between your boards.
+- **Images stored on our own backend.** Drop the external Cloudflare Worker.
+  Client converts to WebP, uploads to a backend endpoint, which stores the bytes
+  on the data volume (content-addressed) and returns a same-origin URL that goes
+  into `Object_Image.src`. Images are served as **public capability URLs**
+  (unguessable content hash). Details in §3.8.
 
 ### Review decisions (the six open questions, now resolved)
 These were §6's open questions; answered and folded into the plan:
@@ -75,9 +80,20 @@ These were §6's open questions; answered and folded into the plan:
 - **DOM-as-state** for board objects (see `CLAUDE.md`). This convention is fine
   and stays — switching boards just means tearing down the DOM objects and
   re-`importObjects()`-ing the new board's set.
+- **Images already half-work, via an external service.** The paste handler
+  (`listeners.svelte.ts`) converts to WebP client-side (`blobToWebP`) and uploads
+  to a **hardcoded Cloudflare Worker** (`flat-math-274b.tom-c-gray.workers.dev`),
+  swapping the returned `fileUrl` into the image's `src`. Two problems for
+  self-hosting: (a) the worker is a personal external dependency — a self-hoster's
+  uploads would land in someone else's account; (b) the paste path **never sends
+  `addItem`**, so pasted images are local-only and not synced/persisted, and it
+  seeds `src` with a base64 data URL until the upload resolves.
+  `Object_Image.src` is just a URL string, so the fix is to point uploads at our
+  own backend and sync the resulting URL.
 
-Three things have to change structurally: **ports → one**, **persistence → SQLite
-behind an interface**, **board → a real, gated, multi-instance abstraction.**
+Four things have to change structurally: **ports → one**, **persistence → SQLite
+behind an interface**, **board → a real, gated, multi-instance abstraction**, and
+**image upload/storage → our own backend** (no external worker).
 
 ---
 
@@ -160,6 +176,13 @@ upgrades are automatic for self-hosters.
 > upsert) instead of rewriting the whole board on every drag, and it scales to
 > big boards. Each row stores the `Object` as a JSON column keyed by
 > `(board_id, id)`.
+
+> **Image bytes do *not* go in SQLite.** Uploaded image binaries live on the
+> filesystem (the same `/data` volume), behind a separate small `BlobStore`
+> interface, served as static files — see §3.8. SQLite only ever holds the
+> *URL* inside the image object's `src`. Keeping blobs out of the DB keeps it
+> small, makes HTTP caching trivial, and leaves an S3-style backend as a future
+> `BlobStore` implementation.
 
 #### Schema v1
 
@@ -321,6 +344,81 @@ Per `CLAUDE.md`, edit `types.ts` first; both ends follow.
 - After join, `addItem`/`alterItem`/`removeItem`/`diceRoll` are routed by the
   socket's bound room — no `boardId` needed on the wire after join.
 
+> **Images add nothing to the wire protocol.** `Object_Image.src` is already a
+> URL string; it just becomes a same-origin `/uploads/...` URL. The upload itself
+> is a plain HTTP request (§3.8), not a packet. The win: `addItem` for an image
+> now carries a short URL instead of a base64 blob.
+
+### 3.8 Image upload & storage
+
+Replaces the external Cloudflare Worker with a backend endpoint. **Conversion
+stays client-side** (reuse the existing `blobToWebP`); the server stores bytes
+and serves them. Images are **public capability URLs** (unguessable content
+hash).
+
+**Upload flow**
+```
+browser                                   backend
+  │ convert file/paste → WebP blob          │
+  │ (existing blobToWebP)                    │
+  │ POST /api/boards/:id/images             │
+  │   multipart: file=<webp>                │
+  │   X-Board-Passphrase: <passphrase>      │
+  │ ───────────────────────────────────▶    │ verifyPassphrase(id, passphrase)  ← reuses §3.4 auth
+  │                                         │ sniff magic bytes (RIFF/WEBP), enforce size limit
+  │                                         │ hash = sha256(bytes)
+  │                                         │ write /data/uploads/<id>/<hash>.webp (skip if exists = dedup)
+  │  { url: "/uploads/<id>/<hash>.webp" }   │
+  │ ◀───────────────────────────────────    │
+  │ set img src = url, THEN sendMessage      │
+  │  addItem { object } (URL, not base64)   │  ← fixes the paste-doesn't-sync bug
+```
+
+**Storage layout & serving**
+- Files live at `/data/uploads/<boardId>/<sha256>.webp` on the data volume.
+  Board-scoped dir so **board deletion = delete the dir** (clean cascade, ties
+  into admin `DELETE /api/admin/boards/:id`). Content-hash filename dedups
+  identical images within a board.
+- Served by `express.static` mounted at `/uploads` with long-lived immutable
+  cache headers (safe — content-addressed names never change). Same-origin, so
+  it rides the reverse proxy's TLS and works with `<img>`/CSS `background-image`
+  (the app uses `background-image`, see `createImageElement`).
+- A tiny `BlobStore` interface (`put(boardId, bytes) → { url, hash }`,
+  `deleteBoard(boardId)`) wraps the filesystem now; an S3/R2 implementation is a
+  later swap. Distinct from the SQLite `Storage` (§3.2).
+
+**Auth & validation**
+- Upload requires the board passphrase (sent as a header/field; the client
+  already has it in localStorage per §3.6). Server verifies with the same
+  `verifyPassphrase` used at join — no new auth machinery.
+- Server validates: WebP magic bytes (don't store arbitrary uploads) and a max
+  size from `MAX_UPLOAD_MB` (default 25). Rejects others with 4xx.
+
+**Frontend changes**
+- Rip out the hardcoded `flat-math-274b...workers.dev` `fetch`; point at
+  `/api/boards/:id/images`.
+- **Fix the paste path:** only `createImageElement` + `sendMessage(addItem)`
+  *after* the upload resolves and we have the URL — so the synced/persisted
+  `src` is the URL, never the transient base64. (Optionally show the local
+  base64 immediately for snappy UX, then swap to the URL and *then* sync.)
+- Add a real **upload affordance** beyond paste: a file picker / drag-and-drop
+  onto the canvas, routing through the same convert→upload→addItem pipeline.
+- `addImageViaUrlClicking` (external URL paste) can stay as-is, but for true
+  self-containment we may optionally **side-load** external URLs into our store
+  (fetch server-side, store, rewrite `src`) so boards don't rot when third-party
+  hosts disappear. Optional, flagged below.
+
+**Cleanup / orphans (v1 stance)**
+- Board delete removes the whole `/uploads/<boardId>` dir.
+- Per-object delete leaves its file on disk (it may be shared by a duplicated
+  object). Accept these orphans in v1; a later GC pass can diff each board's
+  object `src`s against files on disk. Documented, not built now.
+
+**Existing data**
+- Current `board.json` image `src`s are external (imgur / the old worker). They
+  keep loading as long as those hosts live. An *optional* migration can localize
+  them into our store for self-containment; not required for the cutover.
+
 ---
 
 ## 4. Keeping a good dev environment
@@ -340,15 +438,17 @@ proxy**, plus a prod-like compose for when we want to test the real artifact.
 server: {
   port: 3000,
   proxy: {
-    "/api": "http://localhost:8080",
-    "/ws":  { target: "ws://localhost:8080", ws: true },
+    "/api":     "http://localhost:8080",
+    "/uploads": "http://localhost:8080",   // stored images, served by the backend
+    "/ws":      { target: "ws://localhost:8080", ws: true },
   },
 }
 ```
 
-So `ConnectionManager` connects to `/ws` and `/api/...` everywhere; in dev Vite
-forwards them to the backend, in prod the backend serves them directly. One code
-path, full HMR.
+So `ConnectionManager` connects to `/ws`, uploads hit `/api/...`, and image
+`src`s resolve at `/uploads/...` — same-origin everywhere; in dev Vite forwards
+them to the backend, in prod the backend serves them directly. One code path,
+full HMR.
 
 ### 4.2 Prod-like loop (test the real container)
 - **`docker compose up`** builds the image and runs it with a named volume for
@@ -393,7 +493,7 @@ COPY types.ts ./types.ts
 RUN cd backend && bun install
 COPY backend ./backend
 COPY --from=web /web/frontend/dist ./frontend/dist   # static assets the server serves
-ENV PORT=8080 DB_PATH=/data/barnabus.db
+ENV PORT=8080 DB_PATH=/data/barnabus.db UPLOADS_DIR=/data/uploads
 EXPOSE 8080
 VOLUME ["/data"]
 CMD ["bun", "run", "backend/server.ts"]
@@ -401,14 +501,19 @@ CMD ["bun", "run", "backend/server.ts"]
 
 Notes: the build must keep the shared `types.ts` import path (`../types`) intact
 in both stages; the runtime serves `frontend/dist` via `express.static` (or
-`Bun.serve` `fetch`). `bun:sqlite` needs no system packages. (Pin a Bun version
-tag rather than `latest` for reproducibility.)
+`Bun.serve` `fetch`). Both the SQLite file **and** uploaded images live under the
+single `/data` volume (`barnabus.db` + `uploads/`), so one volume = the whole
+backup unit. `bun:sqlite` needs no system packages, and client-side WebP means no
+native image libs either. (Pin a Bun version tag rather than `latest` for
+reproducibility.)
 
 ### 4.4 Config surface (env vars)
 | Var | Purpose | Default |
 |---|---|---|
 | `PORT` | single HTTP+WS port | `8080` |
 | `DB_PATH` | SQLite file path (on the volume) | `/data/barnabus.db` |
+| `UPLOADS_DIR` | image storage dir (on the volume) | `/data/uploads` |
+| `MAX_UPLOAD_MB` | max accepted image upload size | `25` |
 | `BARNABUS_ADMIN_SECRET` | admin bearer secret | *(required to use admin)* |
 
 ### 4.5 Migrating existing data
@@ -448,12 +553,21 @@ Each phase is independently shippable and leaves `bun run check` green.
   same-origin `/ws` + join payload + one-board-per-tab (Q2); presence strip UI;
   current-board UI. Re-enable `Container.svelte`'s conditional render.
 
-- **Phase 4 — Packaging & docs.**
-  Multi-stage Dockerfile at repo root; `docker-compose.yml`; volume; env config;
-  HTTP healthcheck; self-hoster README (run it, put a reverse proxy in front for
-  TLS, create boards, share link+passphrase, backup = copy the SQLite file).
+- **Phase 4 — Image upload & storage (§3.8).**
+  Backend `POST /api/boards/:id/images` (passphrase-verified, WebP-validated,
+  content-addressed) + `BlobStore` filesystem impl + `express.static /uploads`.
+  Frontend: drop the external worker, rewrite the paste path to upload-then-sync
+  (fixes the local-only-paste bug), add a file-picker / drag-and-drop affordance.
+  Depends on boards + passphrase verify (Phase 2); lands before packaging so the
+  Dockerfile/docs cover the uploads volume. Can overlap Phase 3.
 
-- **Phase 5 — (future) extensible board content.**
+- **Phase 5 — Packaging & docs.**
+  Multi-stage Dockerfile at repo root; `docker-compose.yml`; single `/data`
+  volume (DB + uploads); env config; HTTP healthcheck; self-hoster README (run
+  it, put a reverse proxy in front for TLS, create boards, share
+  link+passphrase, backup = copy the `/data` volume).
+
+- **Phase 6 — (future) extensible board content.**
   The payoff for the abstraction: add the first non-canvas content type (text
   snippets/notes attached to a board) as a new table + packet types + `Storage`
   methods, touching neither rooms nor auth.
@@ -473,5 +587,7 @@ the top):
 | 4 | Passphrase memory | **Remember it** in localStorage (plaintext, documented) |
 | 5 | HTTP server | **Keep Express** + `ws` on shared server |
 | 6 | Delete sync | **Add `removeItem`** packet in Phase 1 |
+| 7 | Image conversion | **Client-side** WebP (reuse `blobToWebP`, no backend image libs) |
+| 8 | Image access | **Public capability URLs** (content-hash, served static) |
 
 No open blockers remain for starting Phase 0.
