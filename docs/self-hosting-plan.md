@@ -29,6 +29,24 @@ front, `bun --watch` on the back).
 - **Client remembers memberships.** The frontend persists, per joined board:
   `{ boardId, name, passphrase, username }` so you can hop between your boards.
 
+### Review decisions (the six open questions, now resolved)
+These were §6's open questions; answered and folded into the plan:
+1. **Admin auth — env secret, accounts-ready.** Gate admin with a shared
+   `BARNABUS_ADMIN_SECRET` env var now, but shape the admin API so a real
+   admin-accounts table can be layered on later without breaking it (§3.5).
+2. **Board switching — one board per tab.** A socket belongs to exactly one
+   board; opening another board = another tab/socket. No in-app switcher (§3.3).
+3. **Presence — build it now.** A live "who's on this board" list ships in v1,
+   using the join usernames. Adds presence packets + member tracking (§3.4a).
+4. **Passphrase — remember it.** Persist the passphrase in localStorage for
+   one-click reconnect; plaintext, documented as an accepted tradeoff (§3.6).
+5. **HTTP server — keep Express.** Bind `ws` to the same HTTP server for
+   single-port; don't rewrite onto `Bun.serve` yet (§3.1).
+6. **Object deletes — fix in Phase 1.** Deletes are local-only today
+   (`deleteSelectedObjects` just calls `obj.remove()`), so they desync and
+   reappear on rejoin. Add a `removeItem` packet + server-side delete in
+   Phase 1 (§3.7, §5).
+
 ### Explicit non-goals (for this effort)
 - No real user accounts / SSO / email. "Identity" stays the per-connection
   `nanoid`; the username is a per-board display name.
@@ -211,13 +229,37 @@ client                                  server
 ```
 
 `identity` stays the per-connection `nanoid`; `name` is the per-board username.
-We may also broadcast lightweight presence (`who's here`) later — out of scope
-for v1 but the username makes it cheap.
+
+### 3.4a Presence — "who's on this board" (v1)
+
+The server already learns each socket's `{ identity.id, username }` at join, so
+a live presence list is cheap and ships in v1.
+
+- **Server tracks members per room.** Alongside the per-board socket set, keep a
+  `Map<socketId, { id, username }>` for each active board.
+- **On successful join:** add the member, reply to the *joiner* with the current
+  member list (piggyback on `joinResponse` or a follow-up `presence` packet),
+  and broadcast a `memberJoined` to the room's siblings.
+- **On disconnect / ping-timeout / leave:** remove the member and broadcast
+  `memberLeft`. This hooks into the existing `removeClient`/close paths in
+  `server.ts` — they must now also know which room the socket was in (the
+  socket→board binding from §3.3 gives us that).
+- **Frontend:** a small `$state` list of `{ id, username }` in
+  `ConnectionManager` (or a `presence.svelte.ts`), rendered as an avatar/name
+  strip on the board. `memberJoined`/`memberLeft`/`presence` update it.
+
+> Presence is *ephemeral* — it lives only in the in-memory room state, never in
+> SQLite. A board with nobody on it simply has an empty member list.
 
 ### 3.5 Admin: creating boards
 
-No user accounts, so admin access is a single **shared secret** from the
-environment (`BARNABUS_ADMIN_SECRET`). Minimal surface:
+No user accounts (yet), so admin access is a single **shared secret** from the
+environment (`BARNABUS_ADMIN_SECRET`). **Accounts-ready:** the admin API is
+authenticated via an `Authorization: Bearer <token>` header where the token is
+*currently* the env secret, but the check lives behind one `requireAdmin()`
+middleware. Swapping in a real admin-accounts table later means changing only
+that middleware (issue per-account session tokens) — the routes below don't
+change. Minimal surface:
 
 - `POST /api/admin/boards`   `{ name, passphrase }`  → creates a board, returns
   `{ id, joinUrl }`. Requires `Authorization: Bearer <ADMIN_SECRET>`.
@@ -266,10 +308,18 @@ Per `CLAUDE.md`, edit `types.ts` first; both ends follow.
   `name`). 
 - Add `Packet_JoinError = { type: "joinError"; identity; reason: string }`.
 - `joinResponse` payload stays "the board's objects" but is now *that board's*
-  set. Consider typing `boardInformation` properly (it's `any` today) as
-  `Record<string, Object>` while we're in here.
-- After join, `addItem`/`alterItem`/`diceRoll` are unchanged on the wire — the
-  server routes them by the socket's bound room.
+  set, **plus the current member list** for presence. Consider typing
+  `boardInformation` properly (it's `any` today) as `Record<string, Object>`
+  while we're in here.
+- **Add `Packet_RemoveItem = { type: "removeItem"; identity; payload: { id }}`**
+  (the Phase-1 delete fix). Server deletes the row from the board and broadcasts
+  to siblings; inbound on the client removes the DOM element by id.
+- **Add presence packets:** `memberJoined` / `memberLeft`
+  (`{ type; identity; payload: { id, username } }`) and optionally a `presence`
+  snapshot (`{ payload: { members: { id, username }[] } }`) if we don't fold the
+  snapshot into `joinResponse`.
+- After join, `addItem`/`alterItem`/`removeItem`/`diceRoll` are routed by the
+  socket's bound room — no `boardId` needed on the wire after join.
 
 ---
 
@@ -378,21 +428,25 @@ Each phase is independently shippable and leaves `bun run check` green.
   proxy; JSON→SQLite import script. Result: *same single-board app*, now SQLite-
   backed, single port, container-buildable. Highest-leverage, lowest-risk.
 
-- **Phase 1 — Board abstraction (server).**
+- **Phase 1 — Board abstraction (server) + delete fix.**
   `boards` table; `board_id` on objects; per-board in-memory cache; room-scoped
   broadcasts. The migrated board becomes the default room. Still no auth UI yet
   (join can default to that one board) so we can verify rooms in isolation.
+  **Also lands the `removeItem` packet + server-side delete** (resolved Q6) —
+  it's cheapest to fix while we're already reworking room broadcasts and storage.
 
-- **Phase 2 — Passphrase + admin.**
-  Passphrase hashing/verify; `join` gating + `joinError`; admin HTTP API +
-  `BARNABUS_ADMIN_SECRET`; `GET /api/boards/:id` lookup. Protocol changes in
-  `types.ts` land here.
+- **Phase 2 — Passphrase, admin, presence.**
+  Passphrase hashing/verify; `join` gating + `joinError`; admin HTTP API behind
+  `requireAdmin()` + `BARNABUS_ADMIN_SECRET` (accounts-ready, Q1); `GET
+  /api/boards/:id` lookup. **Presence (Q3):** per-room member tracking +
+  `memberJoined`/`memberLeft`/snapshot packets. Protocol changes in `types.ts`
+  land here.
 
 - **Phase 3 — Frontend board UX.**
-  Revive landing/board-picker; `membership.svelte.ts` localStorage store; join
-  form + link prefill; `ConnectionManager` same-origin `/ws` + join payload +
-  board-switch (clear DOM → import); current-board UI. Re-enable
-  `Container.svelte`'s conditional render.
+  Revive landing/board-picker; `membership.svelte.ts` localStorage store
+  (remembers passphrase, Q4); join form + link prefill; `ConnectionManager`
+  same-origin `/ws` + join payload + one-board-per-tab (Q2); presence strip UI;
+  current-board UI. Re-enable `Container.svelte`'s conditional render.
 
 - **Phase 4 — Packaging & docs.**
   Multi-stage Dockerfile at repo root; `docker-compose.yml`; volume; env config;
@@ -406,18 +460,18 @@ Each phase is independently shippable and leaves `bun run check` green.
 
 ---
 
-## 6. Open questions to resolve before/while building
-1. **Admin model:** single shared `BARNABUS_ADMIN_SECRET` (proposed) vs. a tiny
-   admin-accounts table? Shared secret is far simpler for self-host; confirm
-   it's enough.
-2. **Board switching UX:** one board per tab (proposed, simplest) vs. in-app
-   switcher that reuses the socket? One-per-tab avoids socket/room churn.
-3. **Presence:** do we want a live "who's on this board" list now (we have the
-   username) or defer? Cheap to add, easy to defer.
-4. **Passphrase in localStorage:** accept the plaintext-convenience tradeoff
-   (proposed) or require re-entry each session? Proposed = remember it.
-5. **Keep Express or move to `Bun.serve`?** Proposed: keep Express for the
-   smallest first diff; reconsider once single-port is in.
-6. **Object delete on the wire:** there's currently no explicit "remove object"
-   packet (deletes happen locally). Multi-client correctness for deletes may
-   need a `removeItem` packet — worth confirming current behavior during Phase 1.
+## 6. Resolved decisions
+
+All six review questions are settled (full rationale in "Review decisions" near
+the top):
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | Admin gating | Env secret now, **accounts-ready** API (`requireAdmin()`) |
+| 2 | Board switching | **One board per tab** (socket = one room) |
+| 3 | Presence | **Build now** (v1, Phase 2) |
+| 4 | Passphrase memory | **Remember it** in localStorage (plaintext, documented) |
+| 5 | HTTP server | **Keep Express** + `ws` on shared server |
+| 6 | Delete sync | **Add `removeItem`** packet in Phase 1 |
+
+No open blockers remain for starting Phase 0.
