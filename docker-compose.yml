@@ -1,0 +1,20 @@
+# Prod-like local run. Use this to verify the packaged container (single port,
+# served frontend, SQLite + uploads persistence). NOT the daily dev loop —
+# for that use `bun run dev` at the repo root (Vite HMR + bun --watch).
+services:
+  barnabus:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      DB_PATH: "/data/barnabus.db"
+      UPLOADS_DIR: "/data/uploads"
+      # Required to use the admin API once Phase 2 lands. Change before deploying.
+      BARNABUS_ADMIN_SECRET: "change-me"
+    volumes:
+      - barnabus-data:/data
+    restart: unless-stopped
+
+volumes:
+  barnabus-data:

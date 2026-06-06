@@ -1,0 +1,23 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# builds
+dist/
+**/dist/
+
+# local data (SQLite db + uploaded images)
+data/
+**/data/
+*.db
+*.db-shm
+*.db-wal
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# misc
+.DS_Store
+*.log

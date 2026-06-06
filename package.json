@@ -1,0 +1,16 @@
+{
+  "name": "barnabus",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n web,api -c cyan,magenta \"bun run dev:web\" \"bun run dev:api\"",
+    "dev:web": "cd frontend && bun run dev",
+    "dev:api": "cd backend && bun run dev",
+    "check": "cd frontend && bun run check && cd ../backend && bun run check",
+    "migrate:json": "cd backend && bun run migrate:json"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

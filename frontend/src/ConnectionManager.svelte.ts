@@ -20,9 +20,30 @@ export const cmState = $state<{
   connectionState: "idle",
 });
 
-export let tryConnection = async (url: string) => {
+// Same-origin WebSocket URL. Works in dev (Vite proxies /ws to the backend) and
+// in production (the backend serves both on one port), and rides the reverse
+// proxy's TLS automatically (wss when the page is https).
+const getWsUrl = (): string => {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  return `${proto}://${location.host}/ws`;
+};
+
+// Connect to the backend over the same origin. Phase 0 connects implicitly to
+// the single default board; the board picker (Phase 3) will replace this.
+export const connect = async () => {
+  if (cmState.connectionState !== "idle") return;
+  return openSocket(getWsUrl());
+};
+
+// Legacy entry point (the commented-out Landing screen). Kept so it still
+// compiles; the host argument is ignored in favor of the same-origin URL.
+export let tryConnection = async (_url?: string) => {
+  return openSocket(getWsUrl());
+};
+
+const openSocket = async (wsUrl: string) => {
   cmState.connectionState = "connecting";
-  cmState.socket = new WebSocket(`ws://${url}`);
+  cmState.socket = new WebSocket(wsUrl);
 
   cmState.socket!.onopen = () => {
     toast("Websocket connected!", "success");
