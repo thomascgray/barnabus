@@ -15,6 +15,12 @@ The repo is a monorepo with three pieces:
 
 Both packages use **Bun** (note `bun.lock` / `bun.lockb`), not npm/node, even though `node` is also present in the Docker image.
 
+### Repo root
+- `bun install` — install root dev tooling (`concurrently`).
+- `bun run dev` — **boots both frontend and backend together** (Vite HMR + `bun --watch`) with prefixed logs; one Ctrl-C stops both. This is the normal day-to-day dev loop — you do **not** need Docker for development.
+- `bun run check` — runs both `frontend` and `backend` checks.
+- `bun run migrate:json` — one-time import of legacy `backend/data/board.json` into SQLite (delegates to the backend script).
+
 ### Frontend (`cd frontend`)
 - `bun install` — install deps.
 - `bun run dev` — Vite dev server on **localhost:3000**.
@@ -27,11 +33,15 @@ Both packages use **Bun** (note `bun.lock` / `bun.lockb`), not npm/node, even th
 - `bun run dev` — `bun --watch server.ts` (hot reload).
 - `bun run start` — run the server once.
 - `bun run build` — bundle to `./dist`.
-- `bun run docker:build` / `bun run docker:run` — containerized run (exposes 5000 + 8080).
+- `bun run check` — type-check (`tsc --noEmit` against `backend/tsconfig.json`). Run after backend changes.
+- `bun run migrate:json` — import legacy `backend/data/board.json` into SQLite.
 
-The backend listens on **HTTP 5000** and **WebSocket 8080**. The frontend connects to `ws://localhost:8080` by default (see `Landing.svelte`).
+The backend listens on a **single port** (`PORT`, default **8080**) serving both HTTP and the WebSocket endpoint at **`/ws`**, plus the built frontend as static files in production. Config is env-driven (`backend/config.ts`: `PORT`, `DB_PATH`, `UPLOADS_DIR`, `STATIC_DIR`). The frontend connects to the **same origin** (`ConnectionManager.connect()` builds `ws(s)://<host>/ws`); in dev the Vite proxy forwards `/ws`, `/api`, `/uploads` to the backend, so app code uses identical paths in dev and prod.
 
-There is no test runner, linter config, or formatter wired up. "Passing CI" means `bun run check` is clean in `frontend/`.
+### Container
+- `docker compose up --build` (repo root) — prod-like single-container run; serves everything on one port with a `/data` volume (SQLite db + uploads). This is for verifying the packaged artifact, **not** daily dev.
+
+There is no test runner, linter config, or formatter wired up. "Passing CI" means `bun run check` is clean in both `frontend/` and `backend/`.
 
 ## Architecture
 
@@ -41,11 +51,11 @@ Everything that crosses the network is a `Packet` — a discriminated union on `
 `PacketWithoutIdentity` is a mapped type used so the client can call `sendMessage({ type: ... })` without manually attaching identity — `ConnectionManager` injects it.
 
 ### Backend (`backend/server.ts`) — a stateful relay
-Single file. Holds two in-memory maps: `sockets` (id → WebSocket) and `boardInformation` (the authoritative board, id → `Object`). Behavior:
-- On `join`: registers the socket and replies with `joinResponse` containing the full current board.
-- On `addItem` / `alterItem`: updates `boardInformation`, **broadcasts to all *other* clients** (siblings), then persists.
+The WebSocket server is attached to the Express HTTP server (one port) at `/ws`. It keeps an in-memory `sockets` map (id → WebSocket) and delegates board state to a **`Storage`** implementation (`backend/storage/`). Behavior:
+- On `join`: registers the socket and replies with `joinResponse` containing the full current board (reconstructed as the legacy `{ [id]: Object }` map the client expects).
+- On `addItem` / `alterItem`: **broadcasts to all *other* clients** (siblings), then `storage.upsertObject(...)`.
 - On `diceRoll`: broadcasts to other clients only (not stored).
-- Persistence is a plain JSON file at `backend/data/board.json`, rewritten on every mutation via `writeBoardStateToFile()` and loaded on startup. This is the durability story — there is no database.
+- Persistence is **SQLite** via Bun's built-in `bun:sqlite` (`SqliteStorage`, file at `DB_PATH`, default `./data/barnabus.db`). Schema is created by a small migration runner (`storage/migrations.ts`). The legacy `JsonStorage` (the old `board.json` behavior) still exists behind the same interface. **Phase 0 runs a single implicit board (`DEFAULT_BOARD_ID`)**; the multi-board/room abstraction is planned in `docs/self-hosting-plan.md`.
 - Liveness: server pings clients every 30s and drops them if no pong within 5s.
 
 The sender never receives its own mutations echoed back; the client applies its own changes locally and optimistically.
@@ -60,8 +70,8 @@ Consequences to internalize before editing:
 - `loadDomIntoMemory()` caches references to singleton DOM nodes (camera, background, selection box, toolbars, dialogs) into the `dom` object once on mount; most modules read from `dom`.
 
 ### Frontend module layering
-- `main.ts` → mounts `Container.svelte` → renders `App.svelte` (the only screen currently; `Landing.svelte` connect-screen is commented out and connection is implicit).
-- `App.svelte` is the composition root. On mount it calls `loadDomIntoMemory()` and **wires raw DOM event listeners** (`mousedown/move/up`, `wheel`, `keydown`, `paste`) to functions in `listeners.svelte.ts`. The visual tree is `Background > Camera > { Objects, SelectionBox, SelectedObjectsWrapper, ResizerHandles }` plus the toolbars and overlay SVGs.
+- `main.ts` → mounts `Container.svelte` → renders `App.svelte` (the only screen currently; `Landing.svelte` connect-screen is commented out).
+- `App.svelte` is the composition root. On mount it calls `loadDomIntoMemory()`, calls `ConnectionManager.connect()` to join the (single, implicit) board over the same-origin WebSocket, and **wires raw DOM event listeners** (`mousedown/move/up`, `wheel`, `keydown`, `paste`) to functions in `listeners.svelte.ts`. The visual tree is `Background > Camera > { Objects, SelectionBox, SelectedObjectsWrapper, ResizerHandles }` plus the toolbars and overlay SVGs.
 - `listeners.svelte.ts` — **low-level event router**. Translates raw mouse/keyboard/wheel/paste events into intent, manages mouse-button bookkeeping (`preMouseDown`/`postMouseUp`), and dispatches into interactions based on `appState.currentTool`. Pan/zoom math lives in `onWheel`. Paste handling converts pasted images to WebP and creates objects.
 - `interactions.svelte.ts` — **the actual operations** (the largest file): selection box, dragging, drawing, resizing, text editing, grid toggling, duplication, locking, measuring, dice/image placement, z-ordering. These mutate the DOM objects and call `ConnectionManager.sendMessage(...)` to broadcast.
 - `ui_updaters.svelte.ts` — keeps derived UI in sync after selection changes: the selected-objects bounding box, the popover/context menu, resize handles.
@@ -82,5 +92,6 @@ There are two coordinate spaces: **screen** (raw client pixels) and **canvas** (
 - **Optimistic local + broadcast-to-others**: when you act on an object, update the DOM locally *and* `sendMessage` the change; the server will not echo it back to you.
 - **Element classes** come from the `CLASSES` constant in `config.svelte.ts` (`_object`, `_image_object`, etc.); object lookups use these class names and `data-objtype`.
 - **WebP conversion**: pasted/added images are converted to WebP client-side (`webp-converter-browser`) before becoming objects.
-- The backend uses CommonJS `require` interop alongside ESM imports — Bun tolerates this; keep it consistent with the existing file if editing `server.ts`.
-- Persistence is whole-file JSON rewrite per mutation; `backend/data/board.json` is the saved board state.
+- The backend uses CommonJS `require` interop (express/cors) alongside ESM imports — Bun tolerates this; keep it consistent with the existing file if editing `server.ts`.
+- Persistence goes through the `Storage` interface (`backend/storage/`), now backed by SQLite (`bun:sqlite`); each object is one row keyed by `(board_id, id)`, upserted per mutation. The SQLite db and (future) uploads live under `./data/` locally and the `/data` volume in the container — both gitignored. `backend/data/board.json` is kept only as the legacy seed for `migrate:json`.
+- There is an in-flight self-hosting effort (multi-board rooms, passphrases, image upload, presence) — see `docs/self-hosting-plan.md` for the full plan and phase breakdown.
