@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "dev": "bun --watch server.ts",
+    "dev": "bun --watch --env-file=../.env server.ts",
     "start": "bun run server.ts",
     "build": "bun build server.ts --outdir ./dist",
     "check": "tsc --noEmit",

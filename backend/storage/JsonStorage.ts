@@ -5,7 +5,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type * as Types from "../../types";
-import type { Storage } from "./Storage";
+import { DEFAULT_BOARD_ID, type BoardMeta, type Storage } from "./Storage";
 
 export class JsonStorage implements Storage {
   private board: { [id: string]: Types.Object } = {};
@@ -37,6 +37,38 @@ export class JsonStorage implements Storage {
 
   ensureBoard(): void {
     // Single-board JSON file: nothing to create.
+  }
+
+  // JsonStorage is the legacy single-board backend — there is exactly one,
+  // always-open board and no passphrase/multi-board support. The board methods
+  // exist only to satisfy the interface; SqliteStorage is the real Phase 2
+  // implementation.
+  private readonly meta: BoardMeta = {
+    id: DEFAULT_BOARD_ID,
+    name: "Default Board",
+    createdAt: 0,
+    updatedAt: 0,
+  };
+
+  createBoard(): BoardMeta {
+    throw new Error("JsonStorage is single-board; createBoard requires SqliteStorage");
+  }
+
+  listBoards(): BoardMeta[] {
+    return [this.meta];
+  }
+
+  getBoard(): BoardMeta {
+    return this.meta;
+  }
+
+  verifyPassphrase(): boolean {
+    return true; // the single legacy board is always open
+  }
+
+  deleteBoard(): void {
+    this.board = {};
+    this.persist();
   }
 
   getObjects(): Types.Object[] {

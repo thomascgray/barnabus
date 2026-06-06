@@ -19,16 +19,15 @@
   import PenToolbar from "./components/pen-toolbar.svelte";
   import LeftToolbar from "./components/left-toolbar.svelte";
   import ResizerHandle from "./components/resizer-handle.svelte";
-  import * as ConnectionManager from "./ConnectionManager.svelte";
+  import PresenceStrip from "./components/presence-strip.svelte";
 
   // import testDataSet from "../test_data_sets/1.txt";
 
   onMount(() => {
     loadDomIntoMemory();
 
-    // Phase 0: connect implicitly to the single default board so sync and
-    // persistence actually run. The board picker (Phase 3) replaces this.
-    ConnectionManager.connect();
+    // App only mounts once connected (Container gates on connectionState), so
+    // the connection itself is initiated from the Landing board-picker now.
 
     // @ts-ignore
     window.exportObjects = exportObjects;
@@ -46,7 +45,10 @@
       passive: false,
     });
     window.addEventListener("keydown", Listeners.key_DOWN);
+    window.addEventListener("copy", Listeners.onCopy);
     window.addEventListener("paste", Listeners.onPaste);
+    window.addEventListener("dragover", Listeners.onDragOver);
+    window.addEventListener("drop", Listeners.onDrop);
 
     return () => {
       dom.background.removeEventListener("mousedown", Listeners.mouse_DOWN);
@@ -54,7 +56,10 @@
       dom.background.removeEventListener("mouseup", Listeners.mouse_UP);
       dom.background.removeEventListener("wheel", Listeners.onWheel);
       window.removeEventListener("keydown", Listeners.key_DOWN);
+      window.removeEventListener("copy", Listeners.onCopy);
       window.removeEventListener("paste", Listeners.onPaste);
+      window.removeEventListener("dragover", Listeners.onDragOver);
+      window.removeEventListener("drop", Listeners.onDrop);
 
       // @ts-ignore
       window.exportObjects = null;
@@ -125,6 +130,8 @@
 <svg class="absolute top-0 left-0 pointer-events-none" id="drawingSvgTemplate">
   <path class="pointer-events-auto" style="fill: black" d="" />
 </svg>
+
+<PresenceStrip />
 
 <Toolbar />
 <LeftToolbar />

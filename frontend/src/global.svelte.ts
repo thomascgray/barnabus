@@ -31,6 +31,7 @@ export let appState = $state<iAppState>({
   canvasDrawingTopLeftPoint: { x: 0, y: 0 },
   canvasDrawingBottomRightPoint: { x: 0, y: 0 },
   penSize: 12,
+  penColour: "#000000",
   selectedObjects: [],
   drawingPoints: [],
   isResizingBR: false,
@@ -75,7 +76,7 @@ export let dom: {
   leftToolbarMenu: HTMLElement;
 };
 
-export const exportObject = (obj: HTMLElement): Object => {
+export const exportObject = (obj: HTMLElement | SVGElement): Object => {
   const type = obj.dataset.objtype;
 
   if (type !== "image" && type !== "text" && type !== "svg") {
@@ -119,6 +120,12 @@ export const exportObject = (obj: HTMLElement): Object => {
         y: Number(obj.dataset.y),
         width: Number(obj.dataset.width),
         height: Number(obj.dataset.height),
+        // The resize scale and colour live on the inner <path>.
+        scale: Number((obj.children[0] as HTMLElement).dataset.scale) || 1,
+        colour:
+          (obj.children[0] as HTMLElement).dataset.colour ||
+          (obj.children[0] as HTMLElement).style.fill ||
+          "#000000",
       };
   }
 };
@@ -137,6 +144,7 @@ export const importObject = (json: any) => {
   }
   if (json.type === "text") {
     return createTextElement({
+      id: json.id || undefined,
       text: json.text,
       x: json.x,
       y: json.y,
@@ -154,11 +162,14 @@ export const importObject = (json: any) => {
   }
   if (json.type === "svg") {
     return createFreehandSvgElement({
+      id: json.id || undefined,
       pathValue: json.pathValue,
       x: json.x,
       y: json.y,
       width: json.width,
       height: json.height,
+      scale: json.scale,
+      colour: json.colour,
     });
   }
 };
@@ -186,6 +197,13 @@ export const importObjects = (json: string) => {
 // importObject/updateObject, used when another client removes an object.
 export const removeObjectById = (id: string) => {
   document.getElementById(id)?.remove();
+};
+
+// Tear down every board object in the DOM. Used when switching/leaving a board:
+// since objects ARE the DOM (see CLAUDE.md), clearing a board means removing its
+// elements before importing the next board's set.
+export const clearObjects = () => {
+  Array.from(dom.objects).forEach((o) => o.remove());
 };
 
 export const createManyImageElements = (num: number) => {
@@ -231,12 +249,21 @@ export const loadDomIntoMemory = () => {
   };
 };
 
+// Apply a remote object change to the existing DOM element in place (keeping its
+// id). Mirrors the geometry the factories set at creation, per type. Previously
+// only handled images, so text/svg moves and *all* resizes never applied on the
+// receiving client.
 export const updateObject = (obj: Object, isTransition: boolean) => {
   const element = document.getElementById(obj.id);
   if (!element) return;
 
+  // Smoothly animate remote changes. Covers move (transform) AND resize
+  // (width/height) — previously only transform was transitioned, so remote
+  // resizes snapped instantly.
+  const EASING = "cubic-bezier(0.25, 0.1, 0.25, 1)";
+  const TRANSITION = `transform 300ms ${EASING}, width 300ms ${EASING}, height 300ms ${EASING}`;
   if (isTransition) {
-    element.style.transition = `transform ${300}ms cubic-bezier(0.25, 0.1, 0.25, 1)`;
+    element.style.transition = TRANSITION;
   }
 
   if (obj.type === "image") {
@@ -246,12 +273,66 @@ export const updateObject = (obj: Object, isTransition: boolean) => {
     element.dataset.width = String(obj.width);
     element.dataset.height = String(obj.height);
     element.dataset.isGrid = String(obj.isGrid);
+    element.style.width = `${obj.width}px`;
+    element.style.height = `${obj.height}px`;
     element.style.transform = `translate(${obj.x}px, ${obj.y}px)`;
+    element.style.backgroundImage = `url(${obj.src})`;
+  }
+
+  if (obj.type === "svg") {
+    element.dataset.x = String(obj.x);
+    element.dataset.y = String(obj.y);
+    element.dataset.width = String(obj.width);
+    element.dataset.height = String(obj.height);
+    element.style.width = `${obj.width}px`;
+    element.style.height = `${obj.height}px`;
+    element.style.transform = `translate(${obj.x}px, ${obj.y}px) scale(1)`;
+    const path = element.children[0] as SVGPathElement | undefined;
+    if (path) {
+      path.setAttribute("d", obj.pathValue);
+      // Reproduce the resizer's path scale (see Object_SVG.scale). The scale
+      // lives on the path, so the resize animation must transition it here too.
+      path.dataset.scale = String(obj.scale);
+      if (isTransition) path.style.transition = `transform 300ms ${EASING}`;
+      path.style.transform = `scale(${obj.scale})`;
+      // Stroke colour (may be undefined for pre-colour stored objects).
+      if (obj.colour) {
+        path.dataset.colour = obj.colour;
+        path.style.fill = obj.colour;
+        path.style.stroke = obj.colour;
+      }
+    }
+  }
+
+  if (obj.type === "text") {
+    const ta = element as HTMLTextAreaElement;
+    ta.value = obj.text;
+    ta.dataset.x = String(obj.x);
+    ta.dataset.y = String(obj.y);
+    ta.dataset.width = String(obj.width);
+    ta.dataset.widthB = String(obj.width);
+    ta.dataset.height = String(obj.height);
+    ta.dataset.scale = String(obj.scale);
+    ta.dataset.fontSize = String(obj.fontSize);
+    ta.style.transform = `translate(${obj.x}px, ${obj.y}px) scale(${obj.scale})`;
+    // The factory stores the camera-adjusted width in dataset.width and the
+    // unscaled width in style.width (= dataset.width / scale).
+    ta.style.width = `${obj.width / (obj.scale || 1)}px`;
+    ta.style.height = `${obj.height}px`;
+    ta.style.fontSize = `${obj.fontSize}px`;
+    ta.style.color = obj.color;
+    ta.style.backgroundColor = obj.backgroundColor;
+    ta.classList.toggle("font-bold", obj.isBold);
+    ta.classList.toggle("italic", obj.isItalic);
   }
 
   if (isTransition) {
     setTimeout(() => {
       element.style.transition = "";
+      if (obj.type === "svg") {
+        const path = element.children[0] as SVGPathElement | undefined;
+        if (path) path.style.transition = "";
+      }
     }, 300);
     // now remove the transition
   }

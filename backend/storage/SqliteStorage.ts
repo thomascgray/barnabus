@@ -4,7 +4,7 @@ import { Database } from "bun:sqlite";
 import * as fs from "fs";
 import * as path from "path";
 import type * as Types from "../../types";
-import type { Storage } from "./Storage";
+import type { BoardMeta, Storage } from "./Storage";
 import { runMigrations } from "./migrations";
 
 export class SqliteStorage implements Storage {
@@ -30,6 +30,56 @@ export class SqliteStorage implements Storage {
          ON CONFLICT(id) DO NOTHING`
       )
       .run(boardId, name, now, now);
+  }
+
+  createBoard(input: { name: string; passphrase: string }): BoardMeta {
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    // Empty passphrase => open board (verifyPassphrase short-circuits to true).
+    const hash = input.passphrase ? Bun.password.hashSync(input.passphrase) : "";
+    this.db
+      .query(
+        `INSERT INTO boards (id, name, passphrase_hash, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(id, input.name, hash, now, now);
+    return { id, name: input.name, createdAt: now, updatedAt: now };
+  }
+
+  listBoards(): BoardMeta[] {
+    return this.db
+      .query<
+        { id: string; name: string; created_at: number; updated_at: number },
+        []
+      >(`SELECT id, name, created_at, updated_at FROM boards ORDER BY created_at DESC`)
+      .all()
+      .map((r) => ({ id: r.id, name: r.name, createdAt: r.created_at, updatedAt: r.updated_at }));
+  }
+
+  getBoard(boardId: string): BoardMeta | null {
+    const r = this.db
+      .query<
+        { id: string; name: string; created_at: number; updated_at: number },
+        [string]
+      >(`SELECT id, name, created_at, updated_at FROM boards WHERE id = ?`)
+      .get(boardId);
+    return r ? { id: r.id, name: r.name, createdAt: r.created_at, updatedAt: r.updated_at } : null;
+  }
+
+  verifyPassphrase(boardId: string, passphrase: string): boolean {
+    const r = this.db
+      .query<{ passphrase_hash: string }, [string]>(
+        `SELECT passphrase_hash FROM boards WHERE id = ?`
+      )
+      .get(boardId);
+    if (!r) return false; // no such board
+    if (r.passphrase_hash === "") return true; // open board
+    return Bun.password.verifySync(passphrase ?? "", r.passphrase_hash);
+  }
+
+  deleteBoard(boardId: string): void {
+    // Objects cascade via the FK (PRAGMA foreign_keys = ON in the constructor).
+    this.db.query(`DELETE FROM boards WHERE id = ?`).run(boardId);
   }
 
   getObjects(boardId: string): Types.Object[] {

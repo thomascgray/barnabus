@@ -214,13 +214,24 @@ export const endDrawing = (e: MouseEvent) => {
   const width = bottomRightPos.x - topLeftPos.x;
   const height = bottomRightPos.y - topLeftPos.y;
 
-  createFreehandSvgElement({
+  const svgElement = createFreehandSvgElement({
     pathValue: pathValue,
     x: topLeftPos.x - appState.penSize / 2,
     y: topLeftPos.y - appState.penSize / 2,
     width: width + appState.penSize,
     height: height + appState.penSize,
   });
+
+  // Broadcast + persist the stroke, like the image/text add paths do. Without
+  // this the drawing is local-only and never reaches other clients or storage.
+  if (svgElement) {
+    ConnectionManager.sendMessage({
+      type: "addItem",
+      payload: {
+        object: exportObject(svgElement),
+      },
+    });
+  }
 
   // we're done drawing, reset stuff
   drawing_tlX = Infinity;
@@ -316,6 +327,14 @@ export const resizeFunctions = {
 
     calculateSelectedItemsBoundingBox();
 
+    // Broadcast + persist the new size/position to other clients.
+    for (let elem of appState.selectedObjects) {
+      ConnectionManager.sendMessage({
+        type: "alterItem",
+        payload: { object: exportObject(elem) },
+      });
+    }
+
     appState.isResizingBR = false;
   },
 
@@ -358,6 +377,15 @@ export const resizeFunctions = {
     appState.selectedObjects.forEach((el) => {
       el.dataset.widthB = el.dataset.width;
     });
+
+    // Broadcast + persist the new width/position to other clients.
+    for (let elem of appState.selectedObjects) {
+      ConnectionManager.sendMessage({
+        type: "alterItem",
+        payload: { object: exportObject(elem) },
+      });
+    }
+
     appState.isResizingMR = false;
   },
 };
@@ -771,44 +799,52 @@ export const endDraggingObjects = (e: MouseEvent) => {
   appState.isDraggingObjects = false;
 };
 
-export const duplicateSelectedObjects = () => {
+// Create fresh objects from exported JSON, offset so they don't sit exactly on
+// the originals. Selects the new objects and broadcasts each as addItem. Shared
+// by duplicate (key "d") and clipboard paste (ctrl+v) so both handle every
+// object type and any number of objects identically.
+export const spawnObjectsFromExports = (exports: any[]): HTMLElement[] => {
   const newObjects: any[] = [];
 
-  appState.selectedObjects.forEach((el) => {
-    // const export the object to JSON
-    const json = exportObject(el);
-    const x = Number(el.dataset?.x || 0);
-    const y = Number(el.dataset?.y || 0);
+  exports.forEach((json) => {
     const newObject = {
       ...json,
       id: nanoid(8),
-      x: x + 80,
-      y: y + 100,
+      x: Number(json.x || 0) + 40,
+      y: Number(json.y || 0) + 40,
     };
-    newObjects.push(importObject(newObject));
+    const el = importObject(newObject);
+    if (el) newObjects.push(el);
   });
 
-  toast(
-    `Duplicated ${appState.selectedObjects.length} object${
-      appState.selectedObjects.length > 1 ? "s" : ""
-    }`
-  );
+  if (newObjects.length === 0) return [];
 
   deselectObjects();
-
   selectObjects(newObjects);
-
   calculateSelectedItemsBoundingBox();
 
-  newObjects.forEach((obj) => {
-    console.log("obj", obj);
-    ConnectionManager.sendMessage({
-      type: "addItem",
-      payload: {
-        object: exportObject(obj),
-      },
+  // Defer the sync one tick: text objects get their width/height set in a
+  // setTimeout by the factory, so exporting them synchronously would broadcast
+  // NaN sizes. By the time this fires, those dataset values are populated.
+  setTimeout(() => {
+    newObjects.forEach((obj) => {
+      ConnectionManager.sendMessage({
+        type: "addItem",
+        payload: {
+          object: exportObject(obj),
+        },
+      });
     });
   });
+
+  return newObjects;
+};
+
+export const duplicateSelectedObjects = () => {
+  const count = appState.selectedObjects.length;
+  const exports = appState.selectedObjects.map((el) => exportObject(el));
+  spawnObjectsFromExports(exports);
+  toast(`Duplicated ${count} object${count > 1 ? "s" : ""}`);
 };
 
 export const toggleLock = () => {

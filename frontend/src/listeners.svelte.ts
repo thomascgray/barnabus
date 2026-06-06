@@ -2,6 +2,8 @@ import { appState, dom, exportObject } from "./global.svelte";
 import * as Utils from "./utils.svelte";
 import { CLASSES } from "./config.svelte";
 import * as Interactions from "./interactions.svelte";
+import * as ConnectionManager from "./ConnectionManager.svelte";
+import { uploadImage } from "./uploads.svelte";
 import { createImageElement, createTextElement } from "./factories.svelte";
 import {
   performSelectedObjectsChangedUpdate,
@@ -551,6 +553,130 @@ export const key_DOWN = (e: KeyboardEvent) => {
   }
 };
 
+// Marker tagging our serialized objects on the clipboard, so paste can tell our
+// payload apart from arbitrary copied text/images.
+const CLIPBOARD_MARKER = "barnabus/objects";
+
+// ctrl+c: copy the selected on-canvas objects (any type, any number) to the
+// clipboard as serialized JSON. Without this, ctrl+v just re-pasted whatever
+// image was in the OS clipboard — so only single images ever "pasted".
+export const onCopy = (e: ClipboardEvent) => {
+  // If a text object is focused/being edited, let the browser copy its text.
+  if (
+    appState.selectedObjects.length === 1 &&
+    appState.selectedObjects[0].classList.contains(CLASSES.TEXT_OBJECT) &&
+    document.activeElement === appState.selectedObjects[0]
+  ) {
+    return;
+  }
+  if (appState.selectedObjects.length === 0) return;
+
+  e.preventDefault();
+  const payload = {
+    __type: CLIPBOARD_MARKER,
+    objects: appState.selectedObjects.map((el) => exportObject(el)),
+  };
+  e.clipboardData?.setData("text/plain", JSON.stringify(payload));
+};
+
+// If the clipboard holds our serialized objects, recreate them and return true.
+const tryPasteBarnabusObjects = (e: ClipboardEvent): boolean => {
+  const plain = e.clipboardData?.getData("text/plain");
+  if (!plain) return false;
+  try {
+    const parsed = JSON.parse(plain);
+    if (parsed?.__type === CLIPBOARD_MARKER && Array.isArray(parsed.objects)) {
+      Interactions.spawnObjectsFromExports(parsed.objects);
+      const n = parsed.objects.length;
+      toast(`Pasted ${n} object${n > 1 ? "s" : ""}`, "success");
+      return true;
+    }
+  } catch {
+    // not our payload — fall through to OS image/text handling
+  }
+  return false;
+};
+
+// Shared pipeline for adding an image from a Blob (paste or drag-and-drop):
+// convert to WebP → show instant local preview → upload to our backend →
+// swap in the returned URL → broadcast/persist as addItem (with the URL, never
+// the transient base64). On upload failure, the local preview is removed.
+export const addImageFromBlob = async (
+  blob: Blob,
+  screenX: number,
+  screenY: number
+) => {
+  // base64 for an instant local preview + to read the natural dimensions.
+  const base64String: string = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => resolve(ev.target?.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
+  const { width, height } = await new Promise<{ width: number; height: number }>(
+    (resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve({ width: image.width, height: image.height });
+      image.onerror = () => reject(new Error("not a valid image"));
+      image.src = base64String;
+    }
+  );
+
+  const webpBlob = await blobToWebP(blob, { width, height });
+
+  const spawnPoint = Utils.screenToCanvas(
+    screenX,
+    screenY,
+    Number(dom.camera.dataset.x),
+    Number(dom.camera.dataset.y),
+    Number(dom.camera.dataset.z)
+  );
+
+  // Instant local feedback with the base64; we swap in the URL once uploaded.
+  const el = createImageElement({
+    src: base64String,
+    width,
+    height,
+    x: spawnPoint.x - width / 2,
+    y: spawnPoint.y - height / 2,
+  });
+
+  try {
+    const url = await uploadImage(webpBlob);
+    el.style.backgroundImage = `url(${url})`;
+    el.dataset.src = url;
+    // Only now sync — so the persisted/broadcast src is the URL, not the blob.
+    ConnectionManager.sendMessage({
+      type: "addItem",
+      payload: { object: exportObject(el) },
+    });
+    toast("Image added", "success");
+  } catch (err) {
+    console.error("Image upload failed", err);
+    toast("Image upload failed", "error");
+    el.remove();
+  }
+};
+
+// Allow dropping files onto the canvas (without this the browser navigates to
+// the dropped file).
+export const onDragOver = (e: DragEvent) => {
+  e.preventDefault();
+};
+
+// Drag-and-drop image upload: route each dropped image file through the same
+// convert → upload → addItem pipeline as paste, spawning at the drop point.
+export const onDrop = (e: DragEvent) => {
+  e.preventDefault();
+  const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
+    f.type.startsWith("image/")
+  );
+  for (const file of files) {
+    addImageFromBlob(file, e.clientX, e.clientY);
+  }
+};
+
 export const onPaste = async (e: ClipboardEvent) => {
   // if we're focused in a text box, return - let the browser handle it
   if (
@@ -566,6 +692,11 @@ export const onPaste = async (e: ClipboardEvent) => {
 
   e.preventDefault();
   e.stopPropagation();
+
+  // Our own copied objects take priority over OS image/text handling.
+  if (tryPasteBarnabusObjects(e)) {
+    return;
+  }
 
   const clipboardItems = e.clipboardData?.items;
 
@@ -583,72 +714,11 @@ export const onPaste = async (e: ClipboardEvent) => {
 
   for (const item of imagesFromClipboard) {
     const blob = item.getAsFile();
-
     if (!blob) {
       return; // Exit if we cannot get a file from the clipboard item
     }
-
-    const reader = new FileReader();
-    reader.readAsDataURL(blob);
-    reader.onload = function (loadEvent: ProgressEvent<FileReader>) {
-      const base64String = loadEvent.target?.result as string;
-
-      const image = new Image();
-      image.src = base64String;
-      image.onload = async () => {
-        const width = image.width;
-        const height = image.height;
-        toast("Created image from clipboard", "success");
-
-        const webpBlob = await blobToWebP(blob, {
-          /** options */
-          width,
-          height,
-        });
-
-        // make a spawn point thats exactly the middle of the users screen
-        const spawnPoint = Utils.screenToCanvas(
-          window.innerWidth / 2,
-          window.innerHeight / 2,
-          Number(dom.camera.dataset.x),
-          Number(dom.camera.dataset.y),
-          Number(dom.camera.dataset.z)
-        );
-
-        const createdImageElement = createImageElement({
-          src: base64String,
-          width,
-          height,
-          x: spawnPoint.x - width / 2,
-          y: spawnPoint.y - height / 2,
-        });
-
-        // then upload the image to the server
-        try {
-          const formData = new FormData();
-          formData.append("file", webpBlob, "image.webp");
-
-          fetch("https://flat-math-274b.tom-c-gray.workers.dev/", {
-            method: "POST",
-            body: formData,
-          })
-            .then(async (response) => {
-              const json = await response.json();
-              const tempImage = new Image();
-              tempImage.src = json.fileUrl;
-              tempImage.onload = () => {
-                createdImageElement.style.backgroundImage = `url(${json.fileUrl})`;
-                createdImageElement.dataset.src = json.fileUrl;
-              };
-            })
-            .catch((error) => {
-              console.error("Error uploading image:", error);
-            });
-        } catch (e) {
-          console.error("Error converting image to webp", e);
-        }
-      };
-    };
+    // Paste spawns at the centre of the screen.
+    addImageFromBlob(blob, window.innerWidth / 2, window.innerHeight / 2);
   }
 
   if (imagesFromClipboard.length === 0 && textFromClipboard.length === 1) {

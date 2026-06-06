@@ -59,6 +59,7 @@ export interface iAppState {
   canvasDrawingTopLeftPoint: iPos;
   canvasDrawingBottomRightPoint: iPos;
   penSize: number;
+  penColour: string;
   selectedObjects: HTMLElement[];
   drawingPoints: number[][];
   isResizingBR: boolean;

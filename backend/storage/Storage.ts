@@ -10,9 +10,34 @@ import type * as Types from "../../types";
 // Phase 0 runs a single implicit board until the real board abstraction lands.
 export const DEFAULT_BOARD_ID = "default";
 
+// Board metadata as exposed to the relay/admin API. The passphrase hash is
+// deliberately NOT part of this shape — it never leaves the storage layer.
+export interface BoardMeta {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Storage {
-  /** Make sure a board row exists (no-op if it already does). */
+  /** Make sure a board row exists (no-op if it already does). Stays open (no
+   *  passphrase) — used for the implicit default board. */
   ensureBoard(boardId: string, name?: string): void;
+
+  // --- boards (Phase 2) -----------------------------------------------------
+  /** Create a new board with a generated id and (optionally) a passphrase. */
+  createBoard(input: { name: string; passphrase: string }): BoardMeta;
+  /** All boards, newest first. Never includes passphrase hashes. */
+  listBoards(): BoardMeta[];
+  /** A single board's metadata, or null if it doesn't exist. */
+  getBoard(boardId: string): BoardMeta | null;
+  /** True if the board exists and the passphrase matches (open boards — those
+   *  with no passphrase — accept any/empty passphrase). */
+  verifyPassphrase(boardId: string, passphrase: string): boolean;
+  /** Delete a board and (via FK cascade) all its objects. */
+  deleteBoard(boardId: string): void;
+
+  // --- canvas objects (scoped to a board) -----------------------------------
   /** All objects on a board. */
   getObjects(boardId: string): Types.Object[];
   /** Insert or replace a single object. */

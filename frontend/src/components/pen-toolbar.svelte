@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { appState } from "../global.svelte";
+  import { appState, dom } from "../global.svelte";
   import { eTool } from "../types";
   // import { classnames } from "classnames";
   const onMouseDownToolbarButton = (e: Event, id: string) => {
@@ -11,7 +11,29 @@
     //   }
   };
 
-  const onMouseDownColourSelector = (e: Event, id: string) => {};
+  const colours = [
+    { name: "Red", hex: "#ef4444", bg: "bg-red-500" },
+    { name: "Green", hex: "#22c55e", bg: "bg-green-500" },
+    { name: "Blue", hex: "#3b82f6", bg: "bg-blue-500" },
+    { name: "Yellow", hex: "#eab308", bg: "bg-yellow-500" },
+    { name: "Fuchsia", hex: "#d946ef", bg: "bg-fuchsia-500" },
+    { name: "Brown", hex: "#713f12", bg: "bg-yellow-900" },
+    { name: "White", hex: "#ffffff", bg: "bg-white" },
+    { name: "Slate", hex: "#64748b", bg: "bg-slate-500" },
+    { name: "Black", hex: "#000000", bg: "bg-black" },
+  ];
+
+  // Set the current pen colour. New strokes read appState.penColour via the SVG
+  // factory; we also tint the live drawing-preview path so the in-progress
+  // stroke shows the chosen colour.
+  const selectColour = (e: Event, hex: string) => {
+    e.preventDefault();
+    appState.penColour = hex;
+    if (dom?.drawingSvgPath) {
+      dom.drawingSvgPath.style.fill = hex;
+      dom.drawingSvgPath.style.stroke = hex;
+    }
+  };
 </script>
 
 <div
@@ -131,59 +153,18 @@
 
     <!-- color selector buttons -->
     <div class="grid grid-cols-3 gap-2">
-      <button
-        aria-label="Red"
-        onmousedown={(e) => onMouseDownColourSelector(e, "#ef4444")}
-        class="w-5 h-5 toolbar-button bg-red-500 hover:outline-white hover:outline rounded-full p-2 data-[is-selected]:bg-rose-500"
-      ></button>
-
-      <button
-        aria-label="Green"
-        onmousedown={(e) => onMouseDownColourSelector(e, "#22c55e")}
-        class="w-5 h-5 toolbar-button bg-green-500 hover:outline-white hover:outline rounded-full p-2 data-[is-selected]:bg-rose-500"
-      ></button>
-
-      <button
-        onmousedown={(e) => onMouseDownColourSelector(e, "#3b82f6")}
-        id="btn-pencil"
-        class="w-5 h-5 toolbar-button bg-blue-500 hover:outline-white hover:outline rounded-full p-2 data-[is-selected]:bg-rose-500"
-      ></button>
-
-      <button
-        onmousedown={(e) => onMouseDownColourSelector(e, "#eab308")}
-        id="btn-pencil"
-        class="w-5 h-5 toolbar-button bg-yellow-500 hover:outline-white hover:outline rounded-full p-2 data-[is-selected]:bg-rose-500"
-      ></button>
-
-      <button
-        onmousedown={(e) => onMouseDownColourSelector(e, "#d946ef")}
-        id="btn-pencil"
-        class="w-5 h-5 toolbar-button bg-fuchsia-500 hover:outline-white hover:outline rounded-full p-2 data-[is-selected]:bg-rose-500"
-      ></button>
-
-      <button
-        onmousedown={(e) => onMouseDownColourSelector(e, "#713f12")}
-        id="btn-pencil"
-        class="w-5 h-5 toolbar-button bg-yellow-900 hover:outline-white hover:outline rounded-full p-2 data-[is-selected]:bg-rose-500"
-      ></button>
-
-      <button
-        onmousedown={(e) => onMouseDownColourSelector(e, "#ffffff")}
-        id="btn-pencil"
-        class="w-5 h-5 toolbar-button bg-white hover:outline-white hover:outline rounded-full p-2 data-[is-selected]:bg-rose-500"
-      ></button>
-
-      <button
-        onmousedown={(e) => onMouseDownColourSelector(e, "#64748b")}
-        id="btn-pencil"
-        class="w-5 h-5 toolbar-button bg-slate-500 hover:outline-white hover:outline rounded-full p-2 data-[is-selected]:bg-rose-500"
-      ></button>
-
-      <button
-        onmousedown={(e) => onMouseDownColourSelector(e, "#000000")}
-        id="btn-pencil"
-        class="w-5 h-5 toolbar-button bg-black hover:outline-white hover:outline rounded-full p-2 data-[is-selected]:bg-rose-500"
-      ></button>
+      {#each colours as c (c.hex)}
+        <button
+          aria-label={c.name}
+          title={c.name}
+          onmousedown={(e) => selectColour(e, c.hex)}
+          class={`w-5 h-5 toolbar-button ${c.bg} rounded-full hover:outline hover:outline-white ${
+            appState.penColour === c.hex
+              ? "outline outline-2 outline-white outline-offset-2"
+              : ""
+          }`}
+        ></button>
+      {/each}
     </div>
   </div>
 

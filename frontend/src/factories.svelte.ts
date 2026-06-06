@@ -111,21 +111,30 @@ export function createImageElement(args: {
 }
 
 export interface createFreehandSvgElementArgs {
+  id?: string;
   pathValue: string;
   x: number;
   y: number;
   width: number;
   height: number;
+  scale?: number;
+  colour?: string;
 }
 
 export const createFreehandSvgElement = (
   args: createFreehandSvgElementArgs
 ) => {
-  const { pathValue, x, y, width, height } = args;
+  const { pathValue, x, y, width, height, scale = 1 } = args;
+  // New strokes use the currently selected pen colour; re-imported strokes use
+  // their stored colour.
+  const colour = args.colour ?? appState?.penColour ?? "#000000";
   appState.zIndexCounter++;
   const templateSvg = document.getElementById("drawingSvgTemplate")!;
   const svgElement = templateSvg.cloneNode(true) as SVGSVGElement;
-  const id = nanoid(8);
+  // Preserve the id when re-importing from storage/sync; only generate a fresh
+  // one for brand-new strokes. Otherwise reloaded drawings get new ids and
+  // subsequent edits write duplicate rows.
+  const id = args.id ?? nanoid(8);
   svgElement.id = id;
   svgElement.classList.add(CLASSES.OBJECT, CLASSES.SVG_OBJECT);
   svgElement.style.zIndex = `${appState.zIndexCounter}`;
@@ -133,11 +142,15 @@ export const createFreehandSvgElement = (
   const pathElement = svgElement.children[0] as SVGPathElement;
   pathElement.id = id;
   pathElement.style.zIndex = `${appState.zIndexCounter}`;
-  pathElement.style.fill = dom?.drawingSvgPath?.style?.fill || "black";
-  pathElement.style.stroke = dom?.drawingSvgPath?.style?.stroke || "black";
+  pathElement.style.fill = colour;
+  pathElement.style.stroke = colour;
+  pathElement.dataset.colour = colour;
   pathElement.classList.add(CLASSES.OBJECT, CLASSES.SVG_PATH_OBJECT);
   pathElement.setAttribute("d", pathValue);
-  pathElement.dataset.scale = "1";
+  // Apply the resize scale (1 for fresh strokes; the stored value when
+  // re-importing from storage/sync).
+  pathElement.dataset.scale = String(scale);
+  pathElement.style.transform = `scale(${scale})`;
   pathElement.dataset.isLocked = "false";
 
   document.getElementById("objects")!.appendChild(svgElement);
@@ -158,6 +171,7 @@ export const createFreehandSvgElement = (
 };
 
 export interface ICreateTextElementArgs {
+  id?: string;
   text: string;
   x: number;
   y: number;
@@ -193,7 +207,8 @@ export const createTextElement = (args: ICreateTextElementArgs) => {
   appState.zIndexCounter++;
   const cameraZ = Number(dom?.camera?.dataset?.z || 1);
   const textAreaElement = document.createElement("textarea");
-  let id = nanoid(8);
+  // Preserve the id when re-importing from storage/sync (see SVG factory note).
+  let id = args.id ?? nanoid(8);
 
   textAreaElement.id = id;
   textAreaElement.style.zIndex = `${appState.zIndexCounter}`;
