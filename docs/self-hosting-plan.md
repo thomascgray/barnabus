@@ -685,3 +685,48 @@ Steps are ordered so the app runs after each one:
 
 **Also in Phase 0 (reviewed):** add a backend **`tsc --noEmit` check** script so
 the storage refactor is type-checked, mirroring the frontend's `bun run check`.
+
+---
+
+## Appendix B — Phase 1 detailed breakdown (reviewed)
+
+**Goal:** the server stops being one global board and becomes a map of rooms;
+broadcasts are scoped per board; object deletes finally sync and persist. The
+current picker-less frontend keeps working unchanged by defaulting to the
+`default` board. **No** auth, admin, presence, or picker UI here — those are
+Phase 2/3.
+
+- **1.1 Wire protocol** *(`types.ts`, do first — both ends follow)* —
+  add optional `boardId?: string` to `Packet_Join` (server defaults to
+  `DEFAULT_BOARD_ID` when absent, so no frontend change needed yet); add
+  `Packet_RemoveItem = { type:"removeItem"; identity; payload:{ id:string } }`
+  and put it in the `Packet` union (so `PacketWithoutIdentity` lets the client
+  send it). **Also tighten the pre-existing loose `any`s** while here:
+  `Packet_AddItem.payload.object → Object` and
+  `JoinResponsePacket.boardInformation → Record<string, Object>`, fixing any
+  resulting frontend call-site errors in the same change.
+- **1.2 Server rooms** *(`server.ts`)* — add a per-socket board binding
+  (`socketBoard[id] = boardId`) alongside `sockets`. `onJoin`:
+  `boardId = data.boardId ?? DEFAULT_BOARD_ID` → `ensureBoard` → record binding →
+  return *that board's* objects. `getSiblingSockets(senderId)` returns only
+  sockets bound to the **same** board (this scopes `addItem`/`alterItem`/
+  `diceRoll` broadcasts automatically). `handleAddItem`/`handleAlterItem` persist
+  to the sender's board, not a global const. Drop the module-level
+  `const boardId`; clear the binding in `removeClient`.
+- **1.3 removeItem handler** *(`server.ts`)* — `case "removeItem"` → broadcast to
+  siblings + `storage.deleteObject(senderBoard, id)` (method already exists).
+- **1.4 Frontend send delete** *(`interactions.svelte.ts`)* — `deleteSelectedObjects`
+  emits `removeItem` for each object before `obj.remove()`. Fixes the local-only
+  delete bug (deletes currently desync and reappear on rejoin).
+- **1.5 Frontend apply delete** *(`ConnectionManager.svelte.ts`)* — add
+  `case "removeItem"` → remove element by id (+ deselect if selected), via a new
+  `removeObjectById` helper in `global.svelte.ts` (sits alongside
+  `importObject`/`updateObject`).
+- **1.6 Verify** — `bun run check` clean both packages; two clients: add syncs,
+  **delete syncs and stays gone after rejoin** (SQLite row gone); scripted client
+  on a second `boardId` is isolated (no cross-board traffic, objects persist under
+  the right `board_id`); real frontend behaves exactly as today on `default`.
+
+**Deferred from §3.3 on purpose:** the in-memory per-board object cache. It's a
+perf optimization; SQLite write-through is already correct, so it stays out of
+Phase 1 to keep the diff lean.

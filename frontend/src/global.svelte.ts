@@ -182,6 +182,12 @@ export const importObjects = (json: string) => {
   });
 };
 
+// Remove a board object's DOM element by id. The bridge counterpart to
+// importObject/updateObject, used when another client removes an object.
+export const removeObjectById = (id: string) => {
+  document.getElementById(id)?.remove();
+};
+
 export const createManyImageElements = (num: number) => {
   let rowLength = 50;
   for (let i = 0; i < num; i++) {

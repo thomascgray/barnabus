@@ -7,13 +7,16 @@ export type Packet_Identity = {
 export type Packet_Join = {
   type: "join";
   identity: Packet_Identity;
+  // Which board to join. Optional for now — the server defaults to the implicit
+  // default board when absent (the board-picker UI that sets this lands later).
+  boardId?: string;
 };
 
 export type JoinResponsePacket = {
   type: "joinResponse";
   identity: Packet_Identity;
   payload: {
-    boardInformation: any;
+    boardInformation: Record<string, Object>;
   };
 };
 
@@ -50,7 +53,15 @@ export type Packet_AddItem = {
   type: "addItem";
   identity: Packet_Identity;
   payload: {
-    object: any;
+    object: Object;
+  };
+};
+
+export type Packet_RemoveItem = {
+  type: "removeItem";
+  identity: Packet_Identity;
+  payload: {
+    id: string;
   };
 };
 
@@ -101,7 +112,8 @@ export type Packet =
   | Packet_AlterItem
   | Packet_Ping
   | Packet_Pong
-  | Packet_AddItem;
+  | Packet_AddItem
+  | Packet_RemoveItem;
 
 export type PacketWithoutIdentity = {
   [P in Packet["type"]]: Extract<Packet, { type: P }> extends infer T

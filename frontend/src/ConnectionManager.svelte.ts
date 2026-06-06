@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import {
   importObject,
   importObjects,
+  removeObjectById,
   rollResults,
   updateObject,
 } from "./global.svelte";
@@ -81,6 +82,9 @@ const openSocket = async (wsUrl: string) => {
         break;
       case "alterItem":
         updateObject(data.payload.object, true);
+        break;
+      case "removeItem":
+        removeObjectById(data.payload.id);
         break;
       case "ping":
         onPing();
