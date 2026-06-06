@@ -7,5 +7,12 @@ export default defineConfig({
   server: {
     host: "localhost",
     port: 3000,
+    // Forward backend paths to the bun --watch server so app code always uses
+    // same-origin paths in both dev and prod (no if-dev branching).
+    proxy: {
+      "/api": "http://localhost:8080",
+      "/uploads": "http://localhost:8080",
+      "/ws": { target: "ws://localhost:8080", ws: true },
+    },
   },
 });

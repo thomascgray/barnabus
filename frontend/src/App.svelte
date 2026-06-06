@@ -19,12 +19,16 @@
   import PenToolbar from "./components/pen-toolbar.svelte";
   import LeftToolbar from "./components/left-toolbar.svelte";
   import ResizerHandle from "./components/resizer-handle.svelte";
-  import "./ConnectionManager.svelte";
+  import * as ConnectionManager from "./ConnectionManager.svelte";
 
   // import testDataSet from "../test_data_sets/1.txt";
 
   onMount(() => {
     loadDomIntoMemory();
+
+    // Phase 0: connect implicitly to the single default board so sync and
+    // persistence actually run. The board picker (Phase 3) replaces this.
+    ConnectionManager.connect();
 
     // @ts-ignore
     window.exportObjects = exportObjects;
