@@ -18,10 +18,6 @@ const PING_TIMEOUT = 5000; // 5 seconds to respond to a ping
 const storage: Storage = new SqliteStorage(config.dbPath);
 storage.ensureBoard(DEFAULT_BOARD_ID, "Default Board");
 
-// Phase 0 still runs a single implicit board; the room/board abstraction lands
-// in Phase 1. Until then every client operates on DEFAULT_BOARD_ID.
-const boardId = DEFAULT_BOARD_ID;
-
 // --- HTTP server (serves the built frontend in production) -----------------
 if (fs.existsSync(config.staticDir)) {
   app.use(express.static(config.staticDir));
@@ -48,11 +44,17 @@ const server = app.listen(config.port, function () {
 const wss = new WebSocketServer({ server, path: "/ws" });
 
 const sockets: { [id: string]: WebSocket } = {};
+// Which board each connected client is bound to (set at join). One socket = one
+// board, so broadcasts and persistence are scoped by this map.
+const socketBoard: { [id: string]: string } = {};
 const pendingPings: { [id: string]: ReturnType<typeof setTimeout> } = {};
 
 const onJoin = (webSocket: WebSocket, data: Types.Packet_Join) => {
+  const boardId = data.boardId ?? DEFAULT_BOARD_ID;
+  storage.ensureBoard(boardId);
   sockets[data.identity.id] = webSocket;
-  console.log("new client joined:", data.identity.id);
+  socketBoard[data.identity.id] = boardId;
+  console.log("client joined:", data.identity.id, "board:", boardId);
 
   // Reconstruct the legacy { [id]: Object } shape the client expects.
   const objects = storage.getObjects(boardId);
@@ -67,9 +69,12 @@ const onJoin = (webSocket: WebSocket, data: Types.Packet_Join) => {
   );
 };
 
+// Siblings = other clients bound to the same board as `id`. This is what scopes
+// every broadcast (addItem/alterItem/removeItem/diceRoll) to a single room.
 const getSiblingSockets = (id: string): WebSocket[] => {
+  const room = socketBoard[id];
   return Object.keys(sockets)
-    .filter((i) => i !== id)
+    .filter((i) => i !== id && socketBoard[i] === room)
     .map((i) => sockets[i]);
 };
 
@@ -120,6 +125,7 @@ const removeClient = (clientId: string) => {
       console.error("Error closing socket:", e);
     }
     delete sockets[clientId];
+    delete socketBoard[clientId];
     console.log("client removed:", clientId);
   }
 };
@@ -130,12 +136,17 @@ const broadcastToSiblings = (senderId: string, data: Types.Packet) => {
 
 const handleAlterItem = (_webSocket: WebSocket, data: Types.Packet_AlterItem) => {
   broadcastToSiblings(data.identity.id, data);
-  storage.upsertObject(boardId, data.payload.object);
+  storage.upsertObject(socketBoard[data.identity.id], data.payload.object);
 };
 
 const handleAddItem = (_webSocket: WebSocket, data: Types.Packet_AddItem) => {
   broadcastToSiblings(data.identity.id, data);
-  storage.upsertObject(boardId, data.payload.object);
+  storage.upsertObject(socketBoard[data.identity.id], data.payload.object);
+};
+
+const handleRemoveItem = (_webSocket: WebSocket, data: Types.Packet_RemoveItem) => {
+  broadcastToSiblings(data.identity.id, data);
+  storage.deleteObject(socketBoard[data.identity.id], data.payload.id);
 };
 
 // Periodically ping clients and drop ones that don't pong in time.
@@ -174,6 +185,9 @@ wss.on("connection", function connection(ws: WebSocket) {
           break;
         case "addItem":
           handleAddItem(ws, json);
+          break;
+        case "removeItem":
+          handleRemoveItem(ws, json);
           break;
         default:
           console.log("unknown packet type:", (json as any).type);

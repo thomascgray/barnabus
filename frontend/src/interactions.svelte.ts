@@ -469,6 +469,13 @@ export const deleteSelectedObjects = () => {
   ) as HTMLElement[];
   let count = selectedObjects.length;
   for (let obj of selectedObjects) {
+    // Tell the other clients (and the server, so it deletes the row) before
+    // removing locally. Without this, deletes are local-only and the object
+    // reappears for everyone on the next join.
+    ConnectionManager.sendMessage({
+      type: "removeItem",
+      payload: { id: obj.id },
+    });
     obj.remove();
   }
   deselectObjects();
