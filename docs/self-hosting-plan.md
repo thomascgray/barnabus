@@ -424,14 +424,63 @@ browser                                   backend
 ## 4. Keeping a good dev environment
 
 The single-container/single-port prod shape must **not** force us to rebuild the
-frontend to see a change. Strategy: **same code path in dev and prod via a Vite
-proxy**, plus a prod-like compose for when we want to test the real artifact.
+frontend (or re-spin a container) to see a change. **Rule of thumb: you never run
+Docker during day-to-day development.** Docker exists only to (a) produce the
+shippable artifact and (b) occasionally smoke-test the real container. The inner
+loop is plain Bun with hot reload, exactly as it is today. Strategy: **same code
+path in dev and prod via a Vite proxy**, so "works in dev" == "works in the
+container" without rebuilding to find out.
 
-### 4.1 Inner loop (daily dev) — unchanged speed
-- `cd backend && bun run dev` → backend with `bun --watch` on `PORT` (HTTP + `/ws`).
-- `cd frontend && bun run dev` → Vite HMR on `:3000`.
-- **Add a Vite proxy** so the frontend always talks to same-origin paths in both
-  dev and prod (no `if (dev)` branching in app code):
+### 4.0 The two loops at a glance
+
+| | Inner loop (≈all the time) | Outer loop (rarely) |
+|---|---|---|
+| Command | `bun run dev` (repo root) | `docker compose up --build` |
+| Runs | Vite HMR + `bun --watch` backend | the built container |
+| Reload | instant (HMR / process restart) | full image rebuild |
+| Data | local `./data/` (gitignored) | `/data` volume |
+| When | writing features/fixing bugs | before a release, or after touching the Dockerfile |
+| Needs | Bun installed locally | Docker |
+
+You spend your life in the left column. The right column is a verification step,
+not a dev step.
+
+### 4.1 Inner loop (daily dev) — one command, full HMR
+
+**One root command boots both servers** (chosen launcher). Add a tiny repo-root
+`package.json` whose `dev` script runs frontend + backend together with a
+concurrently-style runner and prefixed, colored logs; one `Ctrl-C` stops both:
+
+```jsonc
+// package.json (repo root) — sketch
+{
+  "scripts": {
+    "dev":     "concurrently -n web,api -c cyan,magenta \"bun run dev:web\" \"bun run dev:api\"",
+    "dev:web": "cd frontend && bun run dev",
+    "dev:api": "cd backend  && bun run dev"
+  },
+  "devDependencies": { "concurrently": "^9" }
+}
+```
+
+- `dev:api` → backend with `bun --watch` (HTTP + `/ws` on `PORT`). Edit
+  `server.ts`, it restarts in ms.
+- `dev:web` → Vite HMR on `:3000`. Save a `.svelte`/`.ts` file, the browser
+  patches in place — board state survives.
+- **Local data on your real disk:** `DB_PATH=./data/barnabus.db` and
+  `UPLOADS_DIR=./data/uploads` (a `.env`/defaults for dev). `./data/` is
+  gitignored; `rm -rf data` resets you to a clean slate; the `.db` opens in any
+  SQLite browser. No container, no volume, no rebuild — SQLite is just a file and
+  `bun:sqlite` is built into the Bun you already have.
+
+> Two terminals (`cd backend && bun run dev` / `cd frontend && bun run dev`) still
+> works identically if you ever want them split — the root script is just a
+> convenience wrapper over the same two commands.
+
+**The Vite proxy is what keeps dev and prod identical.** The frontend always uses
+same-origin paths (`/ws`, `/api`, `/uploads`); in dev Vite forwards them to the
+`bun --watch` backend, in the container the backend serves them directly — no
+`if (dev)` branching in app code:
 
 ```ts
 // frontend/vite.config.ts
@@ -446,14 +495,15 @@ server: {
 ```
 
 So `ConnectionManager` connects to `/ws`, uploads hit `/api/...`, and image
-`src`s resolve at `/uploads/...` — same-origin everywhere; in dev Vite forwards
-them to the backend, in prod the backend serves them directly. One code path,
-full HMR.
+`src`s resolve at `/uploads/...` — same-origin everywhere. **Dev vs prod differ
+only by env vars (paths/port), never by code.**
 
 ### 4.2 Prod-like loop (test the real container)
-- **`docker compose up`** builds the image and runs it with a named volume for
-  `/data`. Use this to verify the built static frontend, the single port, and
-  SQLite persistence across restarts — the things the inner loop doesn't exercise.
+- **`docker compose up --build`** builds the image and runs it with a named
+  volume for `/data`. Use this to verify the built static frontend, the single
+  port, and SQLite + uploads persistence across restarts — the things the inner
+  loop doesn't exercise. You run it before a release or after changing the
+  Dockerfile, **not** while writing features.
 
 ```yaml
 # docker-compose.yml (sketch)
