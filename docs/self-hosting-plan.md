@@ -641,3 +641,47 @@ the top):
 | 8 | Image access | **Public capability URLs** (content-hash, served static) |
 
 No open blockers remain for starting Phase 0.
+
+---
+
+## Appendix A — Phase 0 detailed breakdown (reviewed)
+
+**Outcome:** same single-board app, but SQLite-backed, on one port, launchable
+with one root command, container-buildable. No `types.ts`/protocol changes.
+
+> **Finding:** the app currently *never connects* — `tryConnection()` is only
+> called from the commented-out `Landing.svelte`, so today's build is local-only.
+> Phase 0 therefore **restores a minimal implicit auto-connect to a default
+> board** (reviewed decision) so the round-trip is verifiable; the real board
+> picker replaces it in Phase 3. Everything else is behavior-preserving.
+
+Steps are ordered so the app runs after each one:
+
+- **0.1 Dev harness** *(no behavior change)* — root `package.json`
+  (`dev`/`dev:web`/`dev:api` via `concurrently`) + root `.gitignore`
+  (`node_modules`, `dist`, `data/`, `.env`, `*.db`). ✅ `bun run dev` boots both
+  with HMR; one Ctrl-C stops both.
+- **0.2 Env config** — replace `HTTP_PORT`/`WS_PORT` consts with `PORT` (8080),
+  `DB_PATH` (`./data/barnabus.db`), reserved `UPLOADS_DIR`; log resolved config.
+  New `backend/config.ts`.
+- **0.3 One port** *(5000+8080 → one)* — `app.listen(PORT)` then
+  `new WebSocketServer({ server, path:"/ws" })`; `express.static(dist)` if present.
+- **0.4 Storage interface + JsonStorage** *(pure refactor)* —
+  `backend/storage/Storage.ts` + `JsonStorage` wrapping current `board.json`
+  behavior; `server.ts` calls storage instead of touching `boardInformation`
+  directly. No behavior change (still writes `board.json`).
+- **0.5 SqliteStorage + migrations** *(engine swap)* — `bun:sqlite`,
+  `schema_version` + ordered `.sql` runner, schema v1 (`boards`+`objects`, single
+  default board id); switch `server.ts` to it. ✅ restart preserves board.
+- **0.6 JSON→SQLite import** — `bun run migrate:json` imports
+  `backend/data/board.json` into the default board.
+- **0.7 Same-origin connect + minimal auto-connect** *(intentional restore)* —
+  build WS URL from `location` (`/ws`); auto-connect on mount to default board;
+  Vite proxy (`/ws`,`/api`,`/uploads`). ✅ two tabs sync; reload persists;
+  `frontend` `bun run check` clean.
+- **0.8 Container packaging** — root multi-stage `Dockerfile` + `docker-compose.yml`
+  + `/data` volume + `.dockerignore`; retire backend dual-port docker scripts.
+  ✅ `docker compose up --build` works; data survives `down`/`up`.
+
+**Also in Phase 0 (reviewed):** add a backend **`tsc --noEmit` check** script so
+the storage refactor is type-checked, mirroring the frontend's `bun run check`.
