@@ -1,8 +1,12 @@
 # Self-Hosting & Multi-Board Implementation Plan
 
-> Status: **proposal / spec**. No code has been changed yet. This document is the
-> blueprint we'll review and adjust before building. It assumes the architecture
-> described in `CLAUDE.md`.
+> Status: **largely implemented**. Phases 0–5 are done — SQLite persistence,
+> single-port topology, multi-board rooms, passphrase gating, admin API,
+> presence, image upload/storage, and packaging (multi-stage Dockerfile +
+> compose + self-hoster README, container smoke-tested). The remaining future
+> work is **Phase 6** (extensible non-canvas board content). This document is the
+> original blueprint, kept as the design record; per-phase status is marked in §5.
+> It assumes the architecture described in `CLAUDE.md`.
 
 ## 1. Goal
 
@@ -577,33 +581,33 @@ Run it via a `bun run migrate:json` script so nobody loses the current board.
 
 Each phase is independently shippable and leaves `bun run check` green.
 
-- **Phase 0 — Plumbing, no behavior change.**
+- **Phase 0 — Plumbing, no behavior change.** ✅ **Done.**
   Storage interface + `SqliteStorage` (`bun:sqlite`) + migration runner; port
   consolidation (`ws` on the shared HTTP server, serve static `dist`); Vite
   proxy; JSON→SQLite import script. Result: *same single-board app*, now SQLite-
   backed, single port, container-buildable. Highest-leverage, lowest-risk.
 
-- **Phase 1 — Board abstraction (server) + delete fix.**
+- **Phase 1 — Board abstraction (server) + delete fix.** ✅ **Done.**
   `boards` table; `board_id` on objects; per-board in-memory cache; room-scoped
   broadcasts. The migrated board becomes the default room. Still no auth UI yet
   (join can default to that one board) so we can verify rooms in isolation.
   **Also lands the `removeItem` packet + server-side delete** (resolved Q6) —
   it's cheapest to fix while we're already reworking room broadcasts and storage.
 
-- **Phase 2 — Passphrase, admin, presence.**
+- **Phase 2 — Passphrase, admin, presence.** ✅ **Done.**
   Passphrase hashing/verify; `join` gating + `joinError`; admin HTTP API behind
   `requireAdmin()` + `BARNABUS_ADMIN_SECRET` (accounts-ready, Q1); `GET
   /api/boards/:id` lookup. **Presence (Q3):** per-room member tracking +
   `memberJoined`/`memberLeft`/snapshot packets. Protocol changes in `types.ts`
   land here.
 
-- **Phase 3 — Frontend board UX.**
+- **Phase 3 — Frontend board UX.** ✅ **Done.**
   Revive landing/board-picker; `membership.svelte.ts` localStorage store
   (remembers passphrase, Q4); join form + link prefill; `ConnectionManager`
   same-origin `/ws` + join payload + one-board-per-tab (Q2); presence strip UI;
   current-board UI. Re-enable `Container.svelte`'s conditional render.
 
-- **Phase 4 — Image upload & storage (§3.8).**
+- **Phase 4 — Image upload & storage (§3.8).** ✅ **Done.**
   Backend `POST /api/boards/:id/images` (passphrase-verified, WebP-validated,
   content-addressed) + `BlobStore` filesystem impl + `express.static /uploads`.
   Frontend: drop the external worker, rewrite the paste path to upload-then-sync
@@ -611,16 +615,28 @@ Each phase is independently shippable and leaves `bun run check` green.
   Depends on boards + passphrase verify (Phase 2); lands before packaging so the
   Dockerfile/docs cover the uploads volume. Can overlap Phase 3.
 
-- **Phase 5 — Packaging & docs.**
+- **Phase 5 — Packaging & docs.** ✅ **Done.**
   Multi-stage Dockerfile at repo root; `docker-compose.yml`; single `/data`
   volume (DB + uploads); env config; HTTP healthcheck; self-hoster README (run
   it, put a reverse proxy in front for TLS, create boards, share
-  link+passphrase, backup = copy the `/data` volume).
+  link+passphrase, backup = copy the `/data` volume). Container smoke-tested:
+  build clean, admin gating, board create/lookup, upload auth, persistence
+  across restart, `/ws` upgrade `101`, healthcheck `healthy`.
 
-- **Phase 6 — (future) extensible board content.**
+- **Phase 6 — (future) extensible board content.** ⏳ **Not started** — tracked in
+  [#8](https://github.com/thomascgray/barnabus/issues/8).
   The payoff for the abstraction: add the first non-canvas content type (text
   snippets/notes attached to a board) as a new table + packet types + `Storage`
   methods, touching neither rooms nor auth.
+
+> **Deferred follow-ups** (smaller items the phases above left for later, now
+> tracked as issues): uploaded-image orphan GC
+> ([#9](https://github.com/thomascgray/barnabus/issues/9)); upload affordance
+> beyond paste — file picker + drag-and-drop
+> ([#10](https://github.com/thomascgray/barnabus/issues/10)); in-memory per-board
+> object cache ([#11](https://github.com/thomascgray/barnabus/issues/11));
+> multi-client playtest QA
+> ([#7](https://github.com/thomascgray/barnabus/issues/7)).
 
 ---
 
