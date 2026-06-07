@@ -335,6 +335,12 @@ wss.on("connection", function connection(ws: WebSocket) {
         case "diceRoll":
           broadcastToSiblings(json.identity.id, json);
           break;
+        case "imagePreview":
+          // Broadcast-only, like diceRoll: a transient blurry placeholder shown
+          // while the uploader's image is in flight. Never persisted — the real
+          // image follows as an addItem.
+          broadcastToSiblings(json.identity.id, json);
+          break;
         case "alterItem":
           handleAlterItem(ws, json);
           break;

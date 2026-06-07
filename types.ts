@@ -99,6 +99,27 @@ export type Packet_RemoveItem = {
   };
 };
 
+// An ephemeral, broadcast-only packet emitted by the uploader the instant an
+// image is added, BEFORE its upload finishes. It carries a tiny blurry
+// thumbnail (a small data URL) plus the final geometry so other clients can
+// show a placeholder at the right size/position immediately, instead of staring
+// at nothing until the upload completes. The relay forwards it to siblings but
+// NEVER persists it (like diceRoll) — the real image arrives later as a normal
+// addItem with the uploaded URL (and the same id), which replaces the
+// placeholder. A failed upload is signalled with a normal removeItem for that id.
+export type Packet_ImagePreview = {
+  type: "imagePreview";
+  identity: Packet_Identity;
+  payload: {
+    id: string;
+    src: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+};
+
 export type Object_Image = {
   id: string;
   type: "image";
@@ -156,6 +177,7 @@ export type Packet =
   | Packet_Pong
   | Packet_AddItem
   | Packet_RemoveItem
+  | Packet_ImagePreview
   | Packet_MemberJoined
   | Packet_MemberLeft;
 

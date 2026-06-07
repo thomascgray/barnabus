@@ -3,8 +3,10 @@ import {
   clearObjects,
   importObject,
   importObjects,
+  receiveAddItem,
   removeObjectById,
   rollResults,
+  showImagePreview,
   updateObject,
 } from "./global.svelte";
 import { remember } from "./membership.svelte";
@@ -126,7 +128,10 @@ const openSocket = async (wsUrl: string) => {
         rollResults.unshift(payload);
         break;
       case "addItem":
-        importObject(data.payload.object);
+        receiveAddItem(data.payload.object);
+        break;
+      case "imagePreview":
+        showImagePreview(data.payload);
         break;
       case "alterItem":
         updateObject(data.payload.object, true);

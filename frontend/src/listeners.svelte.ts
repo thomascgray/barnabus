@@ -597,10 +597,38 @@ const tryPasteBarnabusObjects = (e: ClipboardEvent): boolean => {
   return false;
 };
 
+// Downscale a loaded image to a tiny thumbnail data URL for the instant blurry
+// preview other clients see while the real upload is in flight (issue #13).
+// Kept very small (longest side ~24px) so it's only a few hundred bytes on the
+// wire; the receiver blurs it to hide the pixelation.
+const makeBlurryThumbnailDataUrl = (
+  image: HTMLImageElement,
+  width: number,
+  height: number
+): string => {
+  const MAX = 24;
+  const scale = Math.min(MAX / width, MAX / height, 1);
+  const tw = Math.max(1, Math.round(width * scale));
+  const th = Math.max(1, Math.round(height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = tw;
+  canvas.height = th;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  ctx.drawImage(image, 0, 0, tw, th);
+  return canvas.toDataURL("image/jpeg", 0.5);
+};
+
 // Shared pipeline for adding an image from a Blob (paste or drag-and-drop):
 // convert to WebP → show instant local preview → upload to our backend →
 // swap in the returned URL → broadcast/persist as addItem (with the URL, never
 // the transient base64). On upload failure, the local preview is removed.
+//
+// Issue #13 — loading feedback while the upload is in flight:
+//  - the uploader's own copy is dimmed/pulsing (CLASSES.IMAGE_UPLOADING),
+//  - everyone else gets an instant blurry placeholder at the right size via a
+//    broadcast-only `imagePreview` packet (never persisted; the real image
+//    follows as the addItem below, or is cleaned up with removeItem on failure).
 export const addImageFromBlob = async (
   blob: Blob,
   screenX: number,
@@ -614,14 +642,13 @@ export const addImageFromBlob = async (
     reader.readAsDataURL(blob);
   });
 
-  const { width, height } = await new Promise<{ width: number; height: number }>(
-    (resolve, reject) => {
-      const image = new Image();
-      image.onload = () => resolve({ width: image.width, height: image.height });
-      image.onerror = () => reject(new Error("not a valid image"));
-      image.src = base64String;
-    }
-  );
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("not a valid image"));
+    img.src = base64String;
+  });
+  const { width, height } = image;
 
   const webpBlob = await blobToWebP(blob, { width, height });
 
@@ -632,21 +659,31 @@ export const addImageFromBlob = async (
     Number(dom.camera.dataset.y),
     Number(dom.camera.dataset.z)
   );
+  const x = spawnPoint.x - width / 2;
+  const y = spawnPoint.y - height / 2;
 
   // Instant local feedback with the base64; we swap in the URL once uploaded.
-  const el = createImageElement({
-    src: base64String,
-    width,
-    height,
-    x: spawnPoint.x - width / 2,
-    y: spawnPoint.y - height / 2,
-  });
+  const el = createImageElement({ src: base64String, width, height, x, y });
+  // Mark our own copy as still-uploading (dimmed/pulsing) until it's synced.
+  el.classList.add(CLASSES.IMAGE_UPLOADING);
+
+  // Give everyone else an instant blurry placeholder at the right size/position,
+  // before the upload finishes. Broadcast-only — the relay never persists it.
+  const thumbnail = makeBlurryThumbnailDataUrl(image, width, height);
+  if (thumbnail) {
+    ConnectionManager.sendMessage({
+      type: "imagePreview",
+      payload: { id: el.id, src: thumbnail, x, y, width, height },
+    });
+  }
 
   try {
     const url = await uploadImage(webpBlob);
     el.style.backgroundImage = `url(${url})`;
     el.dataset.src = url;
+    el.classList.remove(CLASSES.IMAGE_UPLOADING);
     // Only now sync — so the persisted/broadcast src is the URL, not the blob.
+    // Others swap their blurry placeholder for this real image (same id).
     ConnectionManager.sendMessage({
       type: "addItem",
       payload: { object: exportObject(el) },
@@ -656,6 +693,13 @@ export const addImageFromBlob = async (
     console.error("Image upload failed", err);
     toast("Image upload failed", "error");
     el.remove();
+    // Tell everyone else to drop the blurry placeholder we asked them to show.
+    if (thumbnail) {
+      ConnectionManager.sendMessage({
+        type: "removeItem",
+        payload: { id: el.id },
+      });
+    }
   }
 };
 
