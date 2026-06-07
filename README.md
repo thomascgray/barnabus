@@ -108,12 +108,14 @@ curl -X DELETE https://your-host/api/admin/boards/<id> \
 ```
 
 ### As a player — join a board
-Open the join link (or paste the id), enter the **passphrase** and a
-**username**, and join. Your browser remembers boards you've joined for
-one-click reconnect.
+Open the join link an admin shared with you. The invite screen shows which
+board you're joining and who made it; enter the board's **passphrase** (if any)
+and a **username**, and join. Your browser remembers boards you've joined for
+one-click reconnect. (No link handy? Paste it into "Have an invite link?" on the
+dashboard.)
 
-> There is also a built-in open **Default Board** (no passphrase) for quick
-> testing.
+> There is also a built-in open **Example Board** (no passphrase), seeded with a
+> little welcome content to show how the app works.
 
 ---
 

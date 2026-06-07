@@ -28,6 +28,19 @@ const MIGRATIONS: { version: number; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS idx_objects_board ON objects(board_id);
     `,
   },
+  {
+    // The display name of the admin who created a board, shown on the join
+    // screen. Existing rows (and the built-in example board) default to ''.
+    // Also rebrand the built-in "default" board as the "Example Board" (only
+    // if it still has the old auto-seeded name, so a renamed board is left be).
+    version: 2,
+    sql: `
+      ALTER TABLE boards ADD COLUMN created_by TEXT NOT NULL DEFAULT '';
+
+      UPDATE boards SET name = 'Example Board'
+      WHERE id = 'default' AND name = 'Default Board';
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

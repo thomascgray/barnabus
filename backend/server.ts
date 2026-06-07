@@ -18,10 +18,77 @@ const PING_TIMEOUT = 5000; // 5 seconds to respond to a ping
 
 // --- persistence -----------------------------------------------------------
 const storage: Storage = new SqliteStorage(config.dbPath);
-storage.ensureBoard(DEFAULT_BOARD_ID, "Default Board");
+// The built-in board is an *example* of how the app works on a fresh install,
+// not a "default" the admin is forced to keep. It's open (no passphrase) and
+// seeded with a little welcome content the first time it's created.
+storage.ensureBoard(DEFAULT_BOARD_ID, "Example Board");
+seedExampleBoard();
 
 // Uploaded image bytes live on the filesystem, not in SQLite.
 const blobStore: BlobStore = new FsBlobStore(config.uploadsDir);
+
+// Seed the example board with a little welcome content, but only the first time
+// (when it has no objects yet). This makes a fresh install land on something
+// that demonstrates the app instead of a blank canvas. If an admin clears it,
+// we don't keep re-adding the notes.
+function seedExampleBoard(): void {
+  if (storage.getObjects(DEFAULT_BOARD_ID).length > 0) return;
+
+  const note = (
+    id: string,
+    text: string,
+    x: number,
+    y: number,
+    opts: Partial<Types.Object_Text> = {}
+  ): Types.Object_Text => ({
+    id,
+    type: "text",
+    text,
+    x,
+    y,
+    width: 360,
+    height: 60,
+    fontSize: 24,
+    color: "#0f172a",
+    backgroundColor: "#fef9c3",
+    scale: 1,
+    isBold: false,
+    isItalic: false,
+    ...opts,
+  });
+
+  const notes: Types.Object_Text[] = [
+    note("example-welcome", "👋 Welcome to Barnabus!", 120, 120, {
+      fontSize: 40,
+      isBold: true,
+      backgroundColor: "#bfdbfe",
+      width: 460,
+      height: 80,
+    }),
+    note(
+      "example-pan-zoom",
+      "This is an infinite canvas — drag the background to pan, scroll to zoom.",
+      120,
+      230
+    ),
+    note(
+      "example-tools",
+      "Use the toolbar to drop text, draw, add images (just paste!), and roll dice.",
+      120,
+      330
+    ),
+    note(
+      "example-share",
+      "Admins make their own boards from the Admin panel and share a join link. This example board is yours to scribble on.",
+      120,
+      430,
+      { width: 460, height: 90 }
+    ),
+  ];
+
+  for (const n of notes) storage.upsertObject(DEFAULT_BOARD_ID, n);
+  console.log(`seeded example board with ${notes.length} welcome notes`);
+}
 
 // Serve uploaded images as static files. Content-addressed names never change,
 // so they're safe to cache aggressively.
@@ -51,16 +118,17 @@ const requireAdmin = (req: any, res: any, next: any) => {
 
 // Create a board with an optional passphrase; returns its id + a join link.
 app.post("/api/admin/boards", requireAdmin, (req: any, res: any) => {
-  const { name, passphrase } = req.body ?? {};
+  const { name, passphrase, createdBy } = req.body ?? {};
   if (!name || typeof name !== "string") {
     return res.status(400).json({ error: "name is required" });
   }
   const board = storage.createBoard({
     name,
     passphrase: typeof passphrase === "string" ? passphrase : "",
+    createdBy: typeof createdBy === "string" ? createdBy : "",
   });
   const joinUrl = `${req.protocol}://${req.get("host")}/?board=${board.id}`;
-  res.json({ id: board.id, name: board.name, joinUrl });
+  res.json({ id: board.id, name: board.name, createdBy: board.createdBy, joinUrl });
 });
 
 // List boards (metadata only — never passphrase hashes).
@@ -80,7 +148,7 @@ app.delete("/api/admin/boards/:id", requireAdmin, (req: any, res: any) => {
 app.get("/api/boards/:id", (req: any, res: any) => {
   const board = storage.getBoard(req.params.id);
   if (!board) return res.status(404).json({ error: "not found" });
-  res.json({ id: board.id, name: board.name });
+  res.json({ id: board.id, name: board.name, createdBy: board.createdBy });
 });
 
 // WebP magic bytes: "RIFF"...."WEBP".

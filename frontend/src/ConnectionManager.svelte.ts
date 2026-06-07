@@ -68,7 +68,7 @@ export const connect = async (opts?: {
 }) => {
   if (cmState.connectionState !== "idle") return;
   const boardId = opts?.boardId ?? "default";
-  const boardName = opts?.boardName ?? "Default Board";
+  const boardName = opts?.boardName ?? "Example Board";
   identity.name = opts?.name ?? identity.name ?? "Anonymous";
   cmState.boardId = boardId;
   cmState.boardName = boardName;
