@@ -193,6 +193,79 @@ export const importObjects = (json: string) => {
   });
 };
 
+// Show a blurry placeholder for an image another client is currently uploading
+// (issue #13). It's a normal image element (so it sits at the right size and z
+// in the DOM) tagged as a preview: blurred, non-interactive, and replaced by
+// the real image when its addItem arrives (see receiveAddItem). Ignored if an
+// element with this id already exists (e.g. the real image already landed).
+export const showImagePreview = (preview: {
+  id: string;
+  src: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}) => {
+  if (document.getElementById(preview.id)) return;
+  const el = createImageElement({
+    id: preview.id,
+    src: preview.src,
+    width: preview.width,
+    height: preview.height,
+    x: preview.x,
+    y: preview.y,
+  });
+  el.classList.add(CLASSES.IMAGE_PREVIEW);
+  el.dataset.preview = "true";
+  // Not a real board object yet — keep it out of selection/drag interactions.
+  el.style.pointerEvents = "none";
+};
+
+// Apply a remote addItem. Normally this just imports the new object, but if a
+// blurry upload placeholder (issue #13) is already standing in for this id, we
+// reveal the real image in place — waiting for it to load first so there's no
+// blank flash, then transitioning the blur away so it sharpens into focus.
+export const receiveAddItem = (obj: Object) => {
+  const existing = document.getElementById(obj.id);
+
+  if (existing?.dataset.preview === "true") {
+    if (obj.type === "image") {
+      const real = new Image();
+      const reveal = () => {
+        updateObject(obj, false); // real src + final geometry
+        existing.style.pointerEvents = "";
+        delete existing.dataset.preview;
+        // Animate the blur away (the class still supplies the blur(8px) base, so
+        // this transitions from 8px → 0). Clear the class + inline styles only
+        // once the transition has finished.
+        existing.style.transition = "filter 300ms ease-out";
+        existing.style.filter = "blur(0px)";
+        setTimeout(() => {
+          existing.classList.remove(CLASSES.IMAGE_PREVIEW);
+          existing.style.transition = "";
+          existing.style.filter = "";
+        }, 300);
+      };
+      real.onload = reveal;
+      real.onerror = reveal; // swap anyway if the real image fails to preload
+      real.src = obj.src;
+    } else {
+      // Shouldn't happen (previews are image-only) — just apply it.
+      updateObject(obj, false);
+    }
+    return;
+  }
+
+  // Defensive: if the id already exists for any other reason, update in place
+  // rather than creating a duplicate element with the same id.
+  if (existing) {
+    updateObject(obj, false);
+    return;
+  }
+
+  importObject(obj);
+};
+
 // Remove a board object's DOM element by id. The bridge counterpart to
 // importObject/updateObject, used when another client removes an object.
 export const removeObjectById = (id: string) => {

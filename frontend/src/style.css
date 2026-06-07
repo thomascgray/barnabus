@@ -11,3 +11,27 @@
   outline-style: solid;
   @apply outline-sky-400;
 }
+
+/* Issue #13: the uploader's own image while its upload is in flight — dimmed
+   and gently pulsing so it's clear it isn't synced to the board yet. */
+._image_uploading {
+  animation: barnabus-image-uploading 1.2s ease-in-out infinite;
+}
+
+@keyframes barnabus-image-uploading {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Issue #13: the blurry placeholder other clients see at the correct size and
+   position while the uploader's image is still uploading. The thumbnail is a
+   tiny image stretched to full size, so we blur it to hide the pixelation; it
+   sharpens (a filter transition applied inline) when the real image arrives. */
+._image_preview {
+  filter: blur(8px);
+}
