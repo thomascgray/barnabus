@@ -77,8 +77,7 @@
       <div class="bg-white border border-slate-200 rounded-md p-5">
         <p class="text-lg mb-5">
           You're being invited to join
-          <span class="font-semibold">{boardName}</span>{#if createdBy}
-            by <span class="font-semibold">{createdBy}</span>{/if}.
+          <span class="font-semibold">{boardName}</span>{#if createdBy}&nbsp;by <span class="font-semibold">{createdBy}</span>{/if}.
         </p>
 
         <label class="block mb-3">

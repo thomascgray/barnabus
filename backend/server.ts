@@ -57,32 +57,36 @@ function seedExampleBoard(): void {
     ...opts,
   });
 
+  // Sizes are in canvas pixels and intentionally generous so the wrapped text
+  // isn't clipped (text objects render at their stored height on import).
   const notes: Types.Object_Text[] = [
     note("example-welcome", "👋 Welcome to Barnabus!", 120, 120, {
       fontSize: 40,
       isBold: true,
       backgroundColor: "#bfdbfe",
-      width: 460,
+      width: 640,
       height: 80,
     }),
     note(
       "example-pan-zoom",
-      "This is an infinite canvas — drag the background to pan, scroll to zoom.",
+      "Drag the background to pan, scroll to zoom — the canvas is infinite.",
       120,
-      230
+      250,
+      { width: 540, height: 100 }
     ),
     note(
       "example-tools",
-      "Use the toolbar to drop text, draw, add images (just paste!), and roll dice.",
+      "Use the toolbar to add text, draw, drop images (just paste!), and roll dice.",
       120,
-      330
+      390,
+      { width: 540, height: 100 }
     ),
     note(
       "example-share",
-      "Admins make their own boards from the Admin panel and share a join link. This example board is yours to scribble on.",
+      "Admins create their own boards from the Admin panel and share a join link. This example board is yours to scribble on.",
       120,
-      430,
-      { width: 460, height: 90 }
+      530,
+      { width: 540, height: 140 }
     ),
   ];
 
