@@ -1,34 +1,21 @@
-import { animate, spring } from "motion";
+import sft from "svelte-french-toast";
+
+// Issue #16: toasting is delegated to svelte-french-toast. It owns the DOM
+// lifecycle of each toast (mount + auto-dismiss + unmount), which also fixes
+// the leftover-toast scrollbars from issue #15. The <Toaster /> host lives in
+// Container.svelte. We keep this thin `toast(message, type)` wrapper so every
+// existing call site stays unchanged; reach for `toastApi` directly when you
+// want the richer features (e.g. `toastApi.promise(...)` for image uploads).
+export const toastApi = sft;
 
 export const toast = (message: string, type?: "success" | "error" | "info") => {
-  const toast = document.createElement("div");
-  const toastText = document.createElement("p");
-  toastText.innerText = message;
   switch (type) {
     case "success":
-      toast.style.backgroundColor = "#27ae60";
-      break;
+      return sft.success(message);
     case "error":
-      toast.style.backgroundColor = "#e74c3c";
-      break;
+      return sft.error(message);
     case "info":
     default:
-      toast.style.backgroundColor = "#3498db";
-      break;
+      return sft(message);
   }
-  toast.className =
-    "toast absolute bottom-0 left-0 pointer-events-none p-4 m-4 text-white rounded-lg text-sm";
-  toast.appendChild(toastText);
-  document.body.appendChild(toast);
-
-  const toastRect = toast.getBoundingClientRect();
-  toast.style.transform = `translateY(${toastRect.height}px)`;
-
-  animate(
-    toast,
-    { y: [toastRect.height, 0] },
-    { duration: 0.1, endDelay: 3, easing: spring() }
-  ).finished.then(() => {
-    animate(toast, { y: [0, 200] }, { duration: 0.3 });
-  });
 };
