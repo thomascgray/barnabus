@@ -10,8 +10,6 @@
     setAdminSecret,
   } from "../admin.svelte";
 
-  let { onClose }: { onClose: () => void } = $props();
-
   type BoardMeta = {
     id: string;
     name: string;
@@ -112,42 +110,39 @@
     await loadBoards();
   };
 
-  const lock = () => {
+  const logout = () => {
     clearAdminSecret();
     secretInput = "";
     boards = [];
   };
 </script>
 
-<div class="flex items-center justify-between mb-4">
-  <h2 class="text-lg font-semibold">Admin</h2>
-  <div class="flex items-center gap-3">
-    {#if adminState.authed}
-      <button class="text-sm text-slate-400 hover:text-slate-600 underline" onclick={lock}>
-        lock
-      </button>
-    {/if}
-    <button class="text-sm text-slate-400 hover:text-slate-600 underline" onclick={onClose}>
-      ← back
-    </button>
-  </div>
-</div>
+<h2 class="text-sm font-semibold text-slate-600 uppercase tracking-wide mb-1">Admin</h2>
+<p class="text-xs text-slate-400 mb-2">
+  confirm this server's admin passphrase to perform admin actions
+</p>
 
 {#if !adminState.authed}
-  <p class="text-sm text-slate-500 mb-2">Enter the admin secret to manage boards.</p>
   <div class="flex gap-2">
     <input
-      class="flex-1 p-2 border border-slate-300 rounded-md"
+      class="flex-1 p-2 border border-dashed border-slate-400 rounded-md"
       bind:value={secretInput}
-      placeholder="BARNABUS_ADMIN_SECRET"
+      placeholder="admin pass phrase"
       type="password"
       onkeydown={(e) => e.key === "Enter" && unlock()}
     />
-    <button class="px-3 py-2 bg-slate-800 text-white rounded-md" onclick={unlock}>
-      Unlock
+    <button class="px-3 py-2 bg-slate-200 text-slate-800 rounded-md whitespace-nowrap" onclick={unlock}>
+      login as admin
     </button>
   </div>
 {:else}
+  <div class="flex items-center justify-between gap-2 mb-4">
+    <span class="font-semibold text-green-600">logged in as admin</span>
+    <button class="px-3 py-2 bg-slate-200 text-slate-800 rounded-md whitespace-nowrap" onclick={logout}>
+      logout of admin
+    </button>
+  </div>
+
   <!-- create -->
   <div class="flex flex-col gap-2 bg-white border border-slate-200 rounded-md p-3 mb-4">
     <input

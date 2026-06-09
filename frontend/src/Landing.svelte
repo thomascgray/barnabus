@@ -7,9 +7,20 @@
   import AdminPanel from "./components/admin-panel.svelte";
   import JoinBoard from "./components/join-board.svelte";
 
-  // Shared username — defaults to the last one used.
-  let username = $state(membership.boards[0]?.username ?? "");
-  let showAdmin = $state(false);
+  // Shared username — remembered across visits, defaulting to the last one used.
+  const NAME_KEY = "barnabus.username";
+  const initialName =
+    localStorage.getItem(NAME_KEY) ?? membership.boards[0]?.username ?? "";
+  let username = $state(initialName);
+  // "your name" is shown read-only with an Edit button; editing toggles the
+  // field on and persists the name when saved. Start in edit mode if unset.
+  let editingName = $state(initialName.trim() === "");
+
+  const saveName = () => {
+    username = username.trim();
+    localStorage.setItem(NAME_KEY, username);
+    editingName = false;
+  };
 
   // Routing: when a ?board=<id> link is open we show the dedicated invite/join
   // screen; otherwise the dashboard ("your boards" + admin). Kept in $state so
@@ -20,13 +31,13 @@
   let linkInput = $state("");
 
   const connecting = $derived(
-    ConnectionManager.cmState.connectionState === "connecting"
+    ConnectionManager.cmState.connectionState === "connecting",
   );
 
   // The example board is open (no passphrase). Offer a quick-join unless it's
   // already a saved membership.
   const hasExample = $derived(
-    membership.boards.some((b) => b.boardId === "default")
+    membership.boards.some((b) => b.boardId === "default"),
   );
 
   // Accept either a raw board id or a full join link (…/?board=<id>).
@@ -105,98 +116,117 @@
       <h1 class="text-3xl font-bold mb-1">barnabus</h1>
       <p class="text-slate-500 mb-6">a self-hosted virtual tabletop</p>
 
-      {#if showAdmin}
-        <AdminPanel onClose={() => (showAdmin = false)} />
-      {:else}
-        <!-- username -->
-        <label class="block mb-6">
-          <span class="text-sm font-medium text-slate-600">Your username</span>
-          <input
-            class="mt-1 w-full p-2 border border-slate-300 rounded-md"
-            bind:value={username}
-            placeholder="e.g. Tom"
-            type="text"
-          />
-        </label>
-
-        <!-- saved boards -->
-        <h2 class="text-sm font-semibold text-slate-600 uppercase tracking-wide mb-2">
-          Your boards
-        </h2>
-        {#if membership.boards.length === 0 && hasExample}
-          <p class="text-slate-400 text-sm mb-3">No saved boards yet.</p>
+      <!-- your name -->
+      <h2
+        class="text-sm font-semibold text-slate-600 uppercase tracking-wide mb-2"
+      >
+        Your name
+      </h2>
+      <div class="flex gap-2 mb-6">
+        <input
+          class="flex-1 p-2 rounded-md disabled:bg-transparent disabled:text-slate-700 {editingName
+            ? 'border border-slate-300'
+            : 'border border-dashed border-slate-400'}"
+          bind:value={username}
+          placeholder="e.g. Tom"
+          type="text"
+          disabled={!editingName}
+          onkeydown={(e) => e.key === "Enter" && editingName && saveName()}
+        />
+        {#if editingName}
+          <button
+            class="px-3 py-2 bg-slate-200 text-slate-800 rounded-md"
+            onclick={saveName}>save</button
+          >
+        {:else}
+          <button
+            class="px-3 py-2 bg-slate-200 text-slate-800 rounded-md"
+            onclick={() => (editingName = true)}>edit</button
+          >
         {/if}
-        <ul class="flex flex-col gap-2 mb-3">
-          {#each membership.boards as b (b.boardId)}
-            <li
-              class="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-md p-3"
-            >
-              <div class="min-w-0">
-                <div class="font-medium truncate">{b.name}</div>
-                <div class="text-xs text-slate-400 truncate">as {b.username}</div>
-              </div>
-              <div class="flex items-center gap-2 shrink-0">
-                {#if adminState.authed}
-                  <button
-                    class="px-2 py-1 text-sm border border-slate-300 rounded-md"
-                    title="Copy join link"
-                    onclick={() => copyLink(b.boardId)}>Copy link</button
-                  >
-                {/if}
-                <button
-                  class="px-3 py-1 bg-slate-800 text-white rounded-md text-sm disabled:opacity-50"
-                  disabled={connecting}
-                  onclick={() => joinSaved(b)}>Join</button
-                >
-                <button
-                  class="px-2 py-1 text-slate-400 hover:text-red-500 text-sm"
-                  title="Forget this board"
-                  onclick={() => forget(b.boardId)}>✕</button
-                >
-              </div>
-            </li>
-          {/each}
+      </div>
 
-          {#if !hasExample}
-            <li
-              class="flex items-center justify-between gap-2 bg-white border border-dashed border-slate-300 rounded-md p-3"
-            >
-              <div>
-                <div class="font-medium">Example Board</div>
-                <div class="text-xs text-slate-400">open · no passphrase</div>
-              </div>
+      <!-- saved boards -->
+      <h2
+        class="text-sm font-semibold text-slate-600 uppercase tracking-wide mb-2"
+      >
+        Boards you're on
+      </h2>
+      {#if membership.boards.length === 0 && hasExample}
+        <p class="text-slate-400 text-sm mb-3">No saved boards yet.</p>
+      {/if}
+      <ul class="flex flex-col gap-2 mb-3">
+        {#each membership.boards as b (b.boardId)}
+          <li
+            class="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-md p-3"
+          >
+            <div class="min-w-0">
+              <div class="font-medium truncate">{b.name}</div>
+              <div class="text-xs text-slate-400 truncate">as {b.username}</div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
               <button
                 class="px-3 py-1 bg-slate-800 text-white rounded-md text-sm disabled:opacity-50"
                 disabled={connecting}
-                onclick={joinExample}>Join</button
+                onclick={() => joinSaved(b)}>Join</button
               >
-            </li>
-          {/if}
-        </ul>
+              {#if adminState.authed}
+                <button
+                  class="px-2 py-1 text-sm border border-slate-300 rounded-md"
+                  title="Copy join link"
+                  onclick={() => copyLink(b.boardId)}>Copy join link</button
+                >
+              {/if}
+              <button
+                class="px-2 py-1 text-slate-400 hover:text-red-500 text-sm"
+                title="Forget this board"
+                onclick={() => forget(b.boardId)}>✕</button
+              >
+            </div>
+          </li>
+        {/each}
 
-        <!-- join via link -->
-        <h2 class="text-sm font-semibold text-slate-600 uppercase tracking-wide mb-2 mt-6">
-          Have an invite link?
-        </h2>
-        <div class="flex gap-2 bg-white border border-slate-200 rounded-md p-3">
-          <input
-            class="flex-1 p-2 border border-slate-300 rounded-md"
-            bind:value={linkInput}
-            placeholder="paste a board link or id"
-            type="text"
-            onkeydown={(e) => e.key === "Enter" && openLink()}
-          />
-          <button
-            class="px-3 py-2 bg-slate-800 text-white rounded-md whitespace-nowrap"
-            onclick={openLink}>Continue</button
+        {#if !hasExample}
+          <li
+            class="flex items-center justify-between gap-2 bg-white border border-dashed border-slate-300 rounded-md p-3"
           >
-        </div>
+            <div>
+              <div class="font-medium">Example Board</div>
+              <div class="text-xs text-slate-400">open · no passphrase</div>
+            </div>
+            <button
+              class="px-3 py-1 bg-slate-800 text-white rounded-md text-sm disabled:opacity-50"
+              disabled={connecting}
+              onclick={joinExample}>Join</button
+            >
+          </li>
+        {/if}
+      </ul>
 
+      <!-- join via link -->
+      <h2
+        class="text-sm font-semibold text-slate-600 uppercase tracking-wide mb-2 mt-6"
+      >
+        Have an invite link?
+      </h2>
+      <div class="flex gap-2 bg-white border border-slate-200 rounded-md p-3">
+        <input
+          class="flex-1 p-2 border border-slate-300 rounded-md"
+          bind:value={linkInput}
+          placeholder="paste a board link or id"
+          type="text"
+          onkeydown={(e) => e.key === "Enter" && openLink()}
+        />
         <button
-          class="mt-6 text-sm text-slate-400 hover:text-slate-600 underline"
-          onclick={() => (showAdmin = true)}>Admin</button
+          class="px-3 py-2 bg-slate-800 text-white rounded-md whitespace-nowrap"
+          onclick={openLink}>Continue</button
         >
-      {/if}
+      </div>
+
+      <!-- admin (inline) -->
+      <div class="mt-8">
+        <AdminPanel />
+      </div>
     </div>
   </div>
 {/if}
