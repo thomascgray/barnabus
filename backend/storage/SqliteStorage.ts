@@ -21,7 +21,7 @@ export class SqliteStorage implements Storage {
     runMigrations(this.db);
   }
 
-  ensureBoard(boardId: string, name = "Default Board"): void {
+  ensureBoard(boardId: string, name = "Example Board"): void {
     const now = Date.now();
     this.db
       .query(
@@ -32,38 +32,53 @@ export class SqliteStorage implements Storage {
       .run(boardId, name, now, now);
   }
 
-  createBoard(input: { name: string; passphrase: string }): BoardMeta {
+  createBoard(input: { name: string; passphrase: string; createdBy?: string }): BoardMeta {
     const id = crypto.randomUUID();
     const now = Date.now();
     // Empty passphrase => open board (verifyPassphrase short-circuits to true).
     const hash = input.passphrase ? Bun.password.hashSync(input.passphrase) : "";
+    const createdBy = input.createdBy ?? "";
     this.db
       .query(
-        `INSERT INTO boards (id, name, passphrase_hash, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO boards (id, name, passphrase_hash, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
       )
-      .run(id, input.name, hash, now, now);
-    return { id, name: input.name, createdAt: now, updatedAt: now };
+      .run(id, input.name, hash, createdBy, now, now);
+    return { id, name: input.name, createdBy, createdAt: now, updatedAt: now };
   }
 
   listBoards(): BoardMeta[] {
     return this.db
       .query<
-        { id: string; name: string; created_at: number; updated_at: number },
+        { id: string; name: string; created_by: string; created_at: number; updated_at: number },
         []
-      >(`SELECT id, name, created_at, updated_at FROM boards ORDER BY created_at DESC`)
+      >(`SELECT id, name, created_by, created_at, updated_at FROM boards ORDER BY created_at DESC`)
       .all()
-      .map((r) => ({ id: r.id, name: r.name, createdAt: r.created_at, updatedAt: r.updated_at }));
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        createdBy: r.created_by,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      }));
   }
 
   getBoard(boardId: string): BoardMeta | null {
     const r = this.db
       .query<
-        { id: string; name: string; created_at: number; updated_at: number },
+        { id: string; name: string; created_by: string; created_at: number; updated_at: number },
         [string]
-      >(`SELECT id, name, created_at, updated_at FROM boards WHERE id = ?`)
+      >(`SELECT id, name, created_by, created_at, updated_at FROM boards WHERE id = ?`)
       .get(boardId);
-    return r ? { id: r.id, name: r.name, createdAt: r.created_at, updatedAt: r.updated_at } : null;
+    return r
+      ? {
+          id: r.id,
+          name: r.name,
+          createdBy: r.created_by,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+        }
+      : null;
   }
 
   verifyPassphrase(boardId: string, passphrase: string): boolean {

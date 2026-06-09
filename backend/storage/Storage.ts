@@ -15,6 +15,10 @@ export const DEFAULT_BOARD_ID = "default";
 export interface BoardMeta {
   id: string;
   name: string;
+  // Display name of the admin who created the board (free text supplied at
+  // create time). Shown on the join/invite screen ("…invited by <createdBy>").
+  // Empty for the built-in example board and any pre-existing rows.
+  createdBy: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -25,8 +29,9 @@ export interface Storage {
   ensureBoard(boardId: string, name?: string): void;
 
   // --- boards (Phase 2) -----------------------------------------------------
-  /** Create a new board with a generated id and (optionally) a passphrase. */
-  createBoard(input: { name: string; passphrase: string }): BoardMeta;
+  /** Create a new board with a generated id and (optionally) a passphrase and
+   *  the name of the admin who created it. */
+  createBoard(input: { name: string; passphrase: string; createdBy?: string }): BoardMeta;
   /** All boards, newest first. Never includes passphrase hashes. */
   listBoards(): BoardMeta[];
   /** A single board's metadata, or null if it doesn't exist. */

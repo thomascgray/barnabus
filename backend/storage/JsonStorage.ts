@@ -45,7 +45,8 @@ export class JsonStorage implements Storage {
   // implementation.
   private readonly meta: BoardMeta = {
     id: DEFAULT_BOARD_ID,
-    name: "Default Board",
+    name: "Example Board",
+    createdBy: "",
     createdAt: 0,
     updatedAt: 0,
   };
