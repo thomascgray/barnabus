@@ -350,6 +350,12 @@ export const updateObject = (obj: Object, isTransition: boolean) => {
     element.style.height = `${obj.height}px`;
     element.style.transform = `translate(${obj.x}px, ${obj.y}px)`;
     element.style.backgroundImage = `url(${obj.src})`;
+    // Keep the off-screen culling placeholder size in sync with a remote resize
+    // (issue #21). content-visibility itself persists from the factory.
+    element.style.setProperty(
+      "contain-intrinsic-size",
+      `auto ${obj.width}px ${obj.height}px`
+    );
   }
 
   if (obj.type === "svg") {

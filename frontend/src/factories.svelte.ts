@@ -74,6 +74,21 @@ export function createImageElement(args: {
   imageElement.style.backgroundOrigin = "border-box";
   imageElement.style.backgroundSize = "100% 100%";
   imageElement.style.backgroundRepeat = "no-repeat";
+  // Viewport culling for big boards (issue #21). A board can be tens of
+  // thousands of px across with 1000+ images; Chrome re-rasters every one on
+  // each pan/zoom frame (Firefox/WebRender doesn't). content-visibility:auto
+  // lets Chrome skip layout/paint/raster for images scrolled off-screen, so the
+  // per-frame cost scales with how many images are actually visible, not the
+  // total on the board. The `auto` keyword in contain-intrinsic-size makes
+  // Chrome remember each element's last-rendered size, so this stays correct
+  // across resizes. IMAGES ONLY — text (textarea autosize reads scrollHeight)
+  // and SVG strokes must not be size-contained. setProperty is used because
+  // these properties aren't in every TS lib.dom version.
+  imageElement.style.setProperty("content-visibility", "auto");
+  imageElement.style.setProperty(
+    "contain-intrinsic-size",
+    `auto ${width}px ${height}px`
+  );
 
   grid.style.position = "absolute";
   grid.style.top = "0px";
