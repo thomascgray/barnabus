@@ -62,7 +62,14 @@ export function createImageElement(args: {
   imageElement.dataset.height = height.toString();
   imageElement.dataset.src = src;
   imageElement.dataset.isLocked = "false";
-  imageElement.style.perspective = "2000px";
+  // NOTE: `perspective: 2000px` was removed here for Chrome performance (issue
+  // #21). It established a 3D rendering context on every one of ~1000 image
+  // divs, which bloats Blink's layer/stacking bookkeeping and stops it
+  // collapsing the camera subtree into one cheap composited texture. Its only
+  // consumer was the image-flip feature, whose "f" handler is commented out
+  // (listeners.svelte.ts) and whose flipImage() is unused/broken (it mutates
+  // children[0], which a gridless image doesn't have). If flip is ever revived,
+  // re-add perspective here together with a real inner content child.
   imageElement.style.backgroundImage = `url(${src})`;
   imageElement.style.backgroundOrigin = "border-box";
   imageElement.style.backgroundSize = "100% 100%";

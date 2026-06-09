@@ -33,14 +33,22 @@ export const startDraggingSelectionBox = (e: MouseEvent) => {
   }
   appState.isDraggingSelectionBox = true;
   // dom.objectsContainer.style.pointerEvents = "none";
-  dom.objectsContainer.style.opacity = "0.99";
+  // Promote the objects layer to its own GPU texture for the drag so the
+  // selection box repaints over a cached scene instead of forcing Chrome to
+  // re-raster ~1000 images each frame (issue #21). Cleared in
+  // endDraggingSelectionBoxDrag. (Replaces the old opacity:0.99 layer hack.)
+  dom.objectsContainer.style.willChange = "transform";
 };
 
 export const endDraggingSelectionBoxDrag = (e: MouseEvent) => {
   const selectionDomRect = dom.selectionBox.getBoundingClientRect();
   appState.isDraggingSelectionBox = false;
   // dom.objectsContainer.style.pointerEvents = "auto";
-  dom.objectsContainer.style.opacity = "1";
+  // Drop the layer hint after the gesture settles (deferred so the final
+  // composited frame lands first — clearing it synchronously can re-raster).
+  setTimeout(() => {
+    dom.objectsContainer.style.willChange = "auto";
+  }, 200);
 
   dom.selectionBox.style.display = "none";
 
@@ -563,7 +571,11 @@ export const toggleGrid = (els: HTMLElement[]) => {
 };
 
 export const startPan = (e: MouseEvent) => {
-  dom.camera.style.opacity = "0.99";
+  // Promote #camera to its own GPU layer for the duration of the pan so Chrome
+  // re-composites a cached texture instead of re-rastering the whole ~1000
+  // object scene every frame (issue #21). Cleared (deferred) in endPan.
+  // (Replaces the old opacity:0.99 layer-promotion hack.)
+  dom.camera.style.willChange = "transform";
 };
 
 export const doPan = (e: MouseEvent) => {
@@ -580,7 +592,11 @@ export const doPan = (e: MouseEvent) => {
 };
 
 export const endPan = (e: MouseEvent) => {
-  dom.camera.style.opacity = "1";
+  // Defer dropping the layer hint so the final composited frame settles first,
+  // and so we don't permanently pin GPU memory for a potentially huge layer.
+  setTimeout(() => {
+    dom.camera.style.willChange = "auto";
+  }, 200);
 };
 
 export const increaseGridSize = (els: HTMLElement[]) => {

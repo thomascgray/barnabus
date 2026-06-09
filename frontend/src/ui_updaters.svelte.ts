@@ -31,6 +31,17 @@ export const ui_popoverMenu = () => {
   // todo this needs to be totally abstracted, its not being called
   // at the right points right now, etc.
 
+  // Fast path: with nothing selected there is no popover to position, so skip
+  // the getBoundingClientRect below. This matters because ui_popoverMenu runs
+  // on EVERY pan/zoom frame — and a getBoundingClientRect right after writing
+  // the camera transform forces a synchronous layout flush over the whole
+  // ~1000-object tree, which is a major source of the Chrome jank in issue #21.
+  // (The width <= 0 guard below is still kept for the zero-area-selection edge.)
+  if (appState.selectedObjects.length === 0) {
+    dom.popoverMenu.style.display = "none";
+    return;
+  }
+
   const selectedObjectsWrapperRect =
     dom.selectedObjectsWrapper.getBoundingClientRect();
 
