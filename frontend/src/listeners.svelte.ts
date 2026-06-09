@@ -19,20 +19,6 @@ import {
 } from "webp-converter-browser";
 import { eTool } from "./types";
 
-// Keep #camera promoted to its own compositor layer while a zoom / trackpad-pan
-// gesture is active, then release it shortly after the gesture goes idle so we
-// don't pin GPU memory for a potentially huge layer. Mirrors the will-change
-// toggling startPan/endPan does for middle-mouse panning (issue #21). Wheel
-// events have no clean "end", so we debounce the release on a timer.
-let cameraIdleTimer: ReturnType<typeof setTimeout> | null = null;
-const markCameraActive = () => {
-  dom.camera.style.willChange = "transform";
-  if (cameraIdleTimer) clearTimeout(cameraIdleTimer);
-  cameraIdleTimer = setTimeout(() => {
-    dom.camera.style.willChange = "auto";
-  }, 300);
-};
-
 export const preMouseDown = (e: MouseEvent) => {
   appState.isLeftMouseButtonDown = e.button === 0;
   appState.isMiddleMouseButtonDown = e.button === 1;
@@ -416,7 +402,6 @@ export const onWheel = (e: WheelEvent) => {
     }
     // otherwise, we're panning
     else {
-      markCameraActive();
       const [x, y, z] = Utils.getDomElementTransformAsNumbers(dom.camera);
       const newX = x + (e.deltaX * -1) / z;
       const newY = y + (e.deltaY * -1) / z;
@@ -451,7 +436,6 @@ const performUIStyleUpdatesForCameraZoom = () => {
 };
 
 const performCameraZoom = (xPos: number, yPos: number, distance: number) => {
-  markCameraActive();
   const [x, y, z] = Utils.getDomElementTransformAsNumbers(dom.camera);
 
   const newCamera = Utils.calculateNewCamera(

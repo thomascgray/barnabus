@@ -33,22 +33,15 @@ export const startDraggingSelectionBox = (e: MouseEvent) => {
   }
   appState.isDraggingSelectionBox = true;
   // dom.objectsContainer.style.pointerEvents = "none";
-  // Promote the objects layer to its own GPU texture for the drag so the
-  // selection box repaints over a cached scene instead of forcing Chrome to
-  // re-raster ~1000 images each frame (issue #21). Cleared in
-  // endDraggingSelectionBoxDrag. (Replaces the old opacity:0.99 layer hack.)
-  dom.objectsContainer.style.willChange = "transform";
+  // Deliberately NO promotion of #objects here — it's the same giant (>16k)
+  // layer as #camera, so promoting it just moves the GPU tile-thrash onto the
+  // selection-box drag (issue #21). The selection box has its own small layer.
 };
 
 export const endDraggingSelectionBoxDrag = (e: MouseEvent) => {
   const selectionDomRect = dom.selectionBox.getBoundingClientRect();
   appState.isDraggingSelectionBox = false;
   // dom.objectsContainer.style.pointerEvents = "auto";
-  // Drop the layer hint after the gesture settles (deferred so the final
-  // composited frame lands first — clearing it synchronously can re-raster).
-  setTimeout(() => {
-    dom.objectsContainer.style.willChange = "auto";
-  }, 200);
 
   dom.selectionBox.style.display = "none";
 
@@ -571,11 +564,12 @@ export const toggleGrid = (els: HTMLElement[]) => {
 };
 
 export const startPan = (e: MouseEvent) => {
-  // Promote #camera to its own GPU layer for the duration of the pan so Chrome
-  // re-composites a cached texture instead of re-rastering the whole ~1000
-  // object scene every frame (issue #21). Cleared (deferred) in endPan.
-  // (Replaces the old opacity:0.99 layer-promotion hack.)
-  dom.camera.style.willChange = "transform";
+  // Deliberately NO layer-promotion hint here. The board can be tens of
+  // thousands of px across; promoting #camera (via will-change or the old
+  // opacity:0.99 trick) forces Chrome to back the whole >16k layer as one giant
+  // tiled texture, which fills the GPU raster-tile budget after a few seconds of
+  // panning and then thrashes — the "smooth then janky" symptom in issue #21.
+  // will-change is only safe on a viewport-sized layer, which this is not.
 };
 
 export const doPan = (e: MouseEvent) => {
@@ -588,15 +582,14 @@ export const doPan = (e: MouseEvent) => {
   dom.camera.dataset.x = String(x - deltaX / z);
   dom.camera.dataset.y = String(y - deltaY / z);
   dom.camera.dataset.z = String(z);
-  ui_popoverMenu();
+  // Skip the popover reposition entirely on the per-frame pan path unless
+  // something is selected (ui_popoverMenu would early-return anyway, but this
+  // avoids the call too). Issue #21.
+  if (appState.selectedObjects.length) ui_popoverMenu();
 };
 
 export const endPan = (e: MouseEvent) => {
-  // Defer dropping the layer hint so the final composited frame settles first,
-  // and so we don't permanently pin GPU memory for a potentially huge layer.
-  setTimeout(() => {
-    dom.camera.style.willChange = "auto";
-  }, 200);
+  // No-op: nothing to clean up now that startPan promotes nothing (issue #21).
 };
 
 export const increaseGridSize = (els: HTMLElement[]) => {
