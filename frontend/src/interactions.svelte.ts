@@ -33,14 +33,15 @@ export const startDraggingSelectionBox = (e: MouseEvent) => {
   }
   appState.isDraggingSelectionBox = true;
   // dom.objectsContainer.style.pointerEvents = "none";
-  dom.objectsContainer.style.opacity = "0.99";
+  // Deliberately NO promotion of #objects here — it's the same giant (>16k)
+  // layer as #camera, so promoting it just moves the GPU tile-thrash onto the
+  // selection-box drag (issue #21). The selection box has its own small layer.
 };
 
 export const endDraggingSelectionBoxDrag = (e: MouseEvent) => {
   const selectionDomRect = dom.selectionBox.getBoundingClientRect();
   appState.isDraggingSelectionBox = false;
   // dom.objectsContainer.style.pointerEvents = "auto";
-  dom.objectsContainer.style.opacity = "1";
 
   dom.selectionBox.style.display = "none";
 
@@ -563,7 +564,12 @@ export const toggleGrid = (els: HTMLElement[]) => {
 };
 
 export const startPan = (e: MouseEvent) => {
-  dom.camera.style.opacity = "0.99";
+  // Deliberately NO layer-promotion hint here. The board can be tens of
+  // thousands of px across; promoting #camera (via will-change or the old
+  // opacity:0.99 trick) forces Chrome to back the whole >16k layer as one giant
+  // tiled texture, which fills the GPU raster-tile budget after a few seconds of
+  // panning and then thrashes — the "smooth then janky" symptom in issue #21.
+  // will-change is only safe on a viewport-sized layer, which this is not.
 };
 
 export const doPan = (e: MouseEvent) => {
@@ -576,11 +582,14 @@ export const doPan = (e: MouseEvent) => {
   dom.camera.dataset.x = String(x - deltaX / z);
   dom.camera.dataset.y = String(y - deltaY / z);
   dom.camera.dataset.z = String(z);
-  ui_popoverMenu();
+  // Skip the popover reposition entirely on the per-frame pan path unless
+  // something is selected (ui_popoverMenu would early-return anyway, but this
+  // avoids the call too). Issue #21.
+  if (appState.selectedObjects.length) ui_popoverMenu();
 };
 
 export const endPan = (e: MouseEvent) => {
-  dom.camera.style.opacity = "1";
+  // No-op: nothing to clean up now that startPan promotes nothing (issue #21).
 };
 
 export const increaseGridSize = (els: HTMLElement[]) => {

@@ -119,9 +119,15 @@
 <!-- </svg> -->
 
 <!-- the drawing svg -->
+<!-- will-change + contain isolate this overlay onto its own compositor layer so
+     the per-mousemove path `d` rewrites during freehand drawing repaint only the
+     overlay, not the ~1000-object scene beneath it (issue #21). z-index sits
+     above #camera but below the measuring overlay/toolbars. Do NOT add
+     `contain: size` — the SVG must keep its class-based w-screen/h-screen size. -->
 <svg
   class="absolute top-0 left-0 pointer-events-none w-screen h-screen"
   id="drawingSvg"
+  style="will-change: transform; contain: layout paint; z-index: 9999;"
 >
   <path style="fill: black" id="drawingSvgPath" d="" />
 </svg>
