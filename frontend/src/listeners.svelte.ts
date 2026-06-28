@@ -271,15 +271,6 @@ export const mouse_UP = (e: MouseEvent) => {
     Interactions.placeTextObject(e);
   }
 
-  // we're placing an image
-  if (appState.isLeftMouseButtonDown && appState.currentTool === eTool.image) {
-    // make sure nothing is selected
-    Interactions.deselectObjects();
-    Interactions.addImageViaUrlClicking(e);
-    Interactions.endDraggingSelectionBoxDrag(e);
-    return;
-  }
-
   // if we've just finished dragging some objects around
   if (appState.isLeftMouseButtonDown && appState.isDraggingObjects) {
     Interactions.endDraggingObjects(e);
@@ -481,6 +472,12 @@ export const key_DOWN = (e: KeyboardEvent) => {
     return;
   }
 
+  // The image modal owns the keyboard while it's open (typing a URL, its own
+  // Enter/Escape), so canvas shortcuts must not fire underneath it.
+  if (appState.isImageModalOpen) {
+    return;
+  }
+
   if (dom.leftToolbarMenu.contains(document.activeElement)) {
     return;
   }
@@ -516,7 +513,7 @@ export const key_DOWN = (e: KeyboardEvent) => {
     Interactions.setActiveTool(eTool.pencil);
   }
   if (e.key === "3") {
-    Interactions.setActiveTool(eTool.image);
+    Interactions.openImageModal();
   }
   if (e.key === "4") {
     Interactions.setActiveTool(eTool.text);
@@ -720,26 +717,6 @@ export const addImageFromBlob = async (
   }
 };
 
-// File-picker upload: open a native file chooser and route each selected image
-// through the same convert → upload → addItem pipeline as paste/drop. There's
-// no cursor position tied to the chooser, so images spawn at the centre of the
-// viewport (like paste).
-export const pickAndUploadImages = () => {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "image/*";
-  input.multiple = true;
-  input.addEventListener("change", () => {
-    const files = Array.from(input.files ?? []).filter((f) =>
-      f.type.startsWith("image/")
-    );
-    for (const file of files) {
-      addImageFromBlob(file, window.innerWidth / 2, window.innerHeight / 2);
-    }
-  });
-  input.click();
-};
-
 // Allow dropping files onto the canvas (without this the browser navigates to
 // the dropped file).
 export const onDragOver = (e: DragEvent) => {
@@ -750,6 +727,12 @@ export const onDragOver = (e: DragEvent) => {
 // convert → upload → addItem pipeline as paste, spawning at the drop point.
 export const onDrop = (e: DragEvent) => {
   e.preventDefault();
+  // When the image modal is open it handles drops itself; bail so we don't also
+  // drop a copy onto the canvas behind it. (preventDefault above still runs so
+  // the browser doesn't navigate to a file dropped on the backdrop.)
+  if (appState.isImageModalOpen) {
+    return;
+  }
   const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
     f.type.startsWith("image/")
   );
@@ -759,6 +742,11 @@ export const onDrop = (e: DragEvent) => {
 };
 
 export const onPaste = async (e: ClipboardEvent) => {
+  // The image modal handles its own paste (e.g. pasting a URL into its input),
+  // so don't hijack the clipboard while it's open.
+  if (appState.isImageModalOpen) {
+    return;
+  }
   // if we're focused in a text box, return - let the browser handle it
   if (
     appState.selectedObjects.length === 1 &&

@@ -1153,57 +1153,58 @@ export const endMeasuring = (e: MouseEvent) => {
   appState.currentMeasuringPoint = null;
 };
 
-export const addImageViaUrlClicking = (e: MouseEvent) => {
-  // ask for an image url
-  const imageUrl = prompt("Enter the image url");
+export const openImageModal = () => {
+  // The image modal is its own thing, not a canvas tool — drop any active
+  // selection/tool gesture so it doesn't fight with the modal.
+  deselectObjects();
+  appState.isImageModalOpen = true;
+};
 
-  if (imageUrl) {
-    try {
-      // if the image url is actually an image, then we can create an image element
-      // get the images original size
-      const image = new Image();
-      image.src = imageUrl;
-      image.onload = () => {
-        const width = image.width;
-        const height = image.height;
+export const closeImageModal = () => {
+  appState.isImageModalOpen = false;
+};
 
-        const spawnPoint = Utils.screenToCanvas(
-          e.clientX,
-          e.clientY,
-          Number(dom.camera.dataset.x),
-          Number(dom.camera.dataset.y),
-          Number(dom.camera.dataset.z)
-        );
+// Add an image to the board from an external URL. Unlike file uploads, the
+// external URL is kept as-is (not side-loaded to our backend) — matching how
+// pasted image URLs are handled. Spawns centred on the given screen point.
+export const addImageFromUrl = (
+  imageUrl: string,
+  screenX: number,
+  screenY: number
+) => {
+  // Load it first so we know the natural size to centre it by.
+  const image = new Image();
+  image.onload = () => {
+    const width = image.width;
+    const height = image.height;
 
-        // create a new image element
-        const domObj = createImageElement({
-          src: imageUrl,
-          width,
-          height,
-          x: spawnPoint.x - width / 2,
-          y: spawnPoint.y - height / 2,
-        });
+    const spawnPoint = Utils.screenToCanvas(
+      screenX,
+      screenY,
+      Number(dom.camera.dataset.x),
+      Number(dom.camera.dataset.y),
+      Number(dom.camera.dataset.z)
+    );
 
-        const rawObj = exportObject(domObj);
+    const domObj = createImageElement({
+      src: imageUrl,
+      width,
+      height,
+      x: spawnPoint.x - width / 2,
+      y: spawnPoint.y - height / 2,
+    });
 
-        ConnectionManager.sendMessage({
-          type: "addItem",
-          payload: {
-            object: rawObj,
-          },
-        });
+    ConnectionManager.sendMessage({
+      type: "addItem",
+      payload: {
+        object: exportObject(domObj),
+      },
+    });
 
-        setActiveTool(eTool.cursor);
-      };
-      image.onerror = () => {
-        alert("Something went wrong trying to make the image");
-        setActiveTool(eTool.cursor);
-      };
-    } catch (error) {
-      alert("Something went wrong trying to make the image");
-      setActiveTool(eTool.cursor);
-    }
-  } else {
-    setActiveTool(eTool.cursor);
-  }
+    toast("Image added", "success");
+  };
+  image.onerror = () => {
+    toast("Couldn't load an image from that URL", "error");
+  };
+  image.src = imageUrl;
 };

@@ -20,6 +20,7 @@
   import LeftToolbar from "./components/left-toolbar.svelte";
   import ResizerHandle from "./components/resizer-handle.svelte";
   import PresenceStrip from "./components/presence-strip.svelte";
+  import ImageUploadModal from "./components/image-upload-modal.svelte";
 
   // import testDataSet from "../test_data_sets/1.txt";
 
@@ -155,6 +156,7 @@
 
 <PenToolbar />
 <PopoverMenu />
+<ImageUploadModal />
 
 <dialog
   id="dialog-object-image"

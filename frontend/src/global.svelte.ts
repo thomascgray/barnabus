@@ -37,6 +37,7 @@ export let appState = $state<iAppState>({
   isResizingBR: false,
   isResizingMR: false,
   isTrackpad: null,
+  isImageModalOpen: false,
   zIndexCounter: 0,
   hasMovedItems: false,
   isDraggingObjects: false,

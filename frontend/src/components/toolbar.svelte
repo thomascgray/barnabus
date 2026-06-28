@@ -3,7 +3,6 @@
   import { eTool } from "../types";
   import ToolbarButton from "./toolbar-button.svelte";
   import * as Interactions from "../interactions.svelte";
-  import * as Listeners from "../listeners.svelte";
 </script>
 
 <div
@@ -49,10 +48,8 @@
         />
       </svg>
     </ToolbarButton>
-    <ToolbarButton
-      onAction={() => Interactions.setActiveTool(eTool.image)}
-      tool={eTool.image}
-    >
+    <!-- add an image (URL, file picker, or drag-and-drop, via a modal) -->
+    <ToolbarButton onAction={() => Interactions.openImageModal()}>
       <svg
         xmlns="http://www.w3.org/2000/svg"
         width="18"
@@ -64,25 +61,6 @@
         <path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0" />
         <path
           d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1z"
-        />
-      </svg>
-    </ToolbarButton>
-
-    <!-- upload image from file (file picker) -->
-    <ToolbarButton onAction={() => Listeners.pickAndUploadImages()}>
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="18"
-        height="18"
-        fill="currentColor"
-        class="bi bi-file-earmark-arrow-up"
-        viewBox="0 0 16 16"
-      >
-        <path
-          d="M8.5 11.5a.5.5 0 0 1-1 0V7.707L6.354 8.854a.5.5 0 1 1-.708-.708l2-2a.5.5 0 0 1 .708 0l2 2a.5.5 0 0 1-.708.708L8.5 7.707z"
-        />
-        <path
-          d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2M9.5 3A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5z"
         />
       </svg>
     </ToolbarButton>

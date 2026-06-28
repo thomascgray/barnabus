@@ -7,7 +7,6 @@ export enum eTool {
   cursor = "cursor",
   hand = "hand",
   pencil = "pencil",
-  image = "image",
   text = "text",
   measuring = "measuring",
 }
@@ -66,6 +65,11 @@ export interface iAppState {
   isResizingBR: boolean;
   isResizingMR: boolean;
   isTrackpad: boolean | null;
+
+  /**
+   * is the "add an image" modal (URL / file-picker / drag-drop) open
+   */
+  isImageModalOpen: boolean;
 
   // measuring
   startMeasuringPoint: iPos | null;
