@@ -720,6 +720,26 @@ export const addImageFromBlob = async (
   }
 };
 
+// File-picker upload: open a native file chooser and route each selected image
+// through the same convert → upload → addItem pipeline as paste/drop. There's
+// no cursor position tied to the chooser, so images spawn at the centre of the
+// viewport (like paste).
+export const pickAndUploadImages = () => {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.multiple = true;
+  input.addEventListener("change", () => {
+    const files = Array.from(input.files ?? []).filter((f) =>
+      f.type.startsWith("image/")
+    );
+    for (const file of files) {
+      addImageFromBlob(file, window.innerWidth / 2, window.innerHeight / 2);
+    }
+  });
+  input.click();
+};
+
 // Allow dropping files onto the canvas (without this the browser navigates to
 // the dropped file).
 export const onDragOver = (e: DragEvent) => {
