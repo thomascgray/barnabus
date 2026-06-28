@@ -14,10 +14,11 @@ export enum eTool {
 
 export enum ePenTool {
   pen = "pen",
-  brush = "brush",
   highlighter = "highlighter",
   square = "square",
   circle = "circle",
+  triangle = "triangle",
+  line = "line",
 }
 
 export enum eMeasuringTool {

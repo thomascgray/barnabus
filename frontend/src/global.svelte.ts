@@ -374,11 +374,13 @@ export const updateObject = (obj: Object, isTransition: boolean) => {
       path.dataset.scale = String(obj.scale);
       if (isTransition) path.style.transition = `transform 300ms ${EASING}`;
       path.style.transform = `scale(${obj.scale})`;
-      // Stroke colour (may be undefined for pre-colour stored objects).
+      // Stroke colour (may be undefined for pre-colour stored objects). Fill
+      // only — see the factory note: a CSS stroke would paint a redundant rim
+      // that compounds into a dark border for translucent highlighter strokes.
       if (obj.colour) {
         path.dataset.colour = obj.colour;
         path.style.fill = obj.colour;
-        path.style.stroke = obj.colour;
+        path.style.stroke = "none";
       }
     }
   }

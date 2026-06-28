@@ -65,6 +65,17 @@
       window.exportObjects = null;
     };
   });
+
+  // Recompute the native brush cursor whenever the tool or pen settings change.
+  // (Zoom is handled imperatively in the wheel handler — camera z isn't reactive
+  // state.) Reading these registers them as effect dependencies.
+  $effect(() => {
+    appState.currentTool;
+    appState.penCurrentTool;
+    appState.penColour;
+    appState.penSize;
+    Interactions.updatePenCursor();
+  });
 </script>
 
 <Background>

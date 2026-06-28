@@ -16,6 +16,7 @@ import {
 } from "./factories.svelte";
 import {
   eMeasuringTool,
+  ePenTool,
   eTool,
   type HTMLDivElementWithCustomFuncs,
 } from "./types";
@@ -25,6 +26,131 @@ let drawing_tlX = Infinity;
 let drawing_tlY = Infinity;
 let drawing_brX = -Infinity;
 let drawing_brY = -Infinity;
+
+// Where the current shape gesture started, in page coords (only used by the
+// shape pen tools). Freehand accumulates its own points as the mouse moves;
+// shapes are recomputed from start→current corner on every move.
+let shapeStartX = 0;
+let shapeStartY = 0;
+
+// The shape tools (anything in ePenTool that isn't a freehand pen). These are
+// laid out by click-and-drag and finalised into an SVG object exactly like a
+// freehand stroke — the only difference is the input points are a computed
+// perimeter rather than the mouse's path.
+const isShapePenTool = (t: ePenTool) =>
+  t === ePenTool.square ||
+  t === ePenTool.circle ||
+  t === ePenTool.triangle ||
+  t === ePenTool.line;
+
+// perfect-freehand options for the current pen tool. Freehand keeps the default
+// pressure-tapered look; shapes want a uniform-width outline so a square reads
+// as a square, not a tapered ribbon.
+const strokeOptionsFor = (size: number) =>
+  isShapePenTool(appState.penCurrentTool)
+    ? { size, thinning: 0, simulatePressure: false }
+    : { size };
+
+// The colour a new stroke is drawn with. The highlighter is just the pen with a
+// low-alpha colour (≈20%), encoded as an 8-digit hex so it round-trips through
+// the existing Object_SVG `colour` field with no wire-protocol change.
+const HIGHLIGHTER_ALPHA_SUFFIX = "33"; // 0x33 / 255 ≈ 0.2
+// The brush *cursor* shows the highlighter more opaque than the real ~20% draw
+// alpha on purpose: at 0.2 the hue is too washed out to read on a small cursor
+// (the grey ring dominates), so it just looks grey. This is only the indicator;
+// actual strokes still finalise at the true 20% via getDrawingColour().
+const HIGHLIGHTER_CURSOR_OPACITY = 0.5;
+const getDrawingColour = () => {
+  if (appState.penCurrentTool === ePenTool.highlighter) {
+    return appState.penColour + HIGHLIGHTER_ALPHA_SUFFIX;
+  }
+  return appState.penColour;
+};
+
+// Build the perimeter points (page coords) for a shape tool, from the gesture's
+// start corner to its current corner. The points are fed straight into
+// getStroke just like a freehand path, so the shape becomes a normal SVG object.
+const SHAPE_CIRCLE_SEGMENTS = 64;
+const SHAPE_POINTS_PER_EDGE = 8;
+const SHAPE_LINE_SEGMENTS = 16;
+// How far a closed shape overlaps itself at the seam so the start/end caps are
+// buried (segments for the circle; the polygons overlap a quarter-edge instead).
+const SHAPE_SEAM_OVERLAP_SEGMENTS = 3;
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const buildShapePoints = (
+  shape: ePenTool,
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number
+): number[][] => {
+  const minX = Math.min(startX, endX);
+  const maxX = Math.max(startX, endX);
+  const minY = Math.min(startY, endY);
+  const maxY = Math.max(startY, endY);
+
+  if (shape === ePenTool.line) {
+    // Densify the segment so the stroke is smooth and uniform end to end.
+    const pts: number[][] = [];
+    for (let i = 0; i <= SHAPE_LINE_SEGMENTS; i++) {
+      const t = i / SHAPE_LINE_SEGMENTS;
+      pts.push([startX + (endX - startX) * t, startY + (endY - startY) * t]);
+    }
+    return pts;
+  }
+
+  if (shape === ePenTool.circle) {
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const rx = (maxX - minX) / 2;
+    const ry = (maxY - minY) / 2;
+    const pts: number[][] = [];
+    // Overshoot past the full revolution by a few segments so the loop overlaps
+    // itself at the seam — that buries perfect-freehand's start/end caps and
+    // closes the otherwise-visible gap where the two ends met exactly.
+    for (let i = 0; i <= SHAPE_CIRCLE_SEGMENTS + SHAPE_SEAM_OVERLAP_SEGMENTS; i++) {
+      const a = (i / SHAPE_CIRCLE_SEGMENTS) * Math.PI * 2;
+      pts.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]);
+    }
+    return pts;
+  }
+
+  // square / triangle. The naive approach (start/end the loop at a corner) leaves
+  // a nub at the start corner and a tail at the end corner, because that's where
+  // perfect-freehand puts its start/end caps. Instead we start AND end in the
+  // middle of the first edge, overlapping slightly: the caps then fall on a
+  // straight, self-overlapping stretch of the outline where they're invisible.
+  const vertices =
+    shape === ePenTool.triangle
+      ? [
+          [(minX + maxX) / 2, minY], // apex
+          [maxX, maxY], // bottom-right
+          [minX, maxY], // bottom-left
+        ]
+      : [
+          [minX, minY],
+          [maxX, minY],
+          [maxX, maxY],
+          [minX, maxY],
+        ];
+  const v0 = vertices[0];
+  const v1 = vertices[1];
+  const mid = [lerp(v0[0], v1[0], 0.5), lerp(v0[1], v1[1], 0.5)];
+  const overshoot = [lerp(v0[0], v1[0], 0.75), lerp(v0[1], v1[1], 0.75)];
+  // Mid of edge0 → every later vertex → back to v0 → mid of edge0 → a bit past it.
+  const anchors = [mid, ...vertices.slice(1), v0, mid, overshoot];
+  const pts: number[][] = [];
+  for (let c = 0; c < anchors.length - 1; c++) {
+    const [ax, ay] = anchors[c];
+    const [bx, by] = anchors[c + 1];
+    for (let i = 0; i < SHAPE_POINTS_PER_EDGE; i++) {
+      const t = i / SHAPE_POINTS_PER_EDGE;
+      pts.push([lerp(ax, bx, t), lerp(ay, by, t)]);
+    }
+  }
+  pts.push([overshoot[0], overshoot[1]]);
+  return pts;
+};
 
 // Selection box
 export const startDraggingSelectionBox = (e: MouseEvent) => {
@@ -131,11 +257,17 @@ export const endDraggingSelectionBoxDrag = (e: MouseEvent) => {
 // Drawing
 export const startDrawing = (e: MouseEvent) => {
   appState.drawingPoints = [];
-  const pos = {
-    x: e.pageX,
-    y: e.pageY,
-  };
-  appState.drawingPoints.push([pos.x, pos.y]);
+  shapeStartX = e.pageX;
+  shapeStartY = e.pageY;
+  appState.drawingPoints.push([e.pageX, e.pageY]);
+
+  // Tint the live preview path with the active drawing colour so the in-progress
+  // stroke matches the finished object exactly. The highlighter carries a
+  // low-alpha colour (so the preview is see-through at the same ~20% it'll
+  // finalise at), and stroke is `none` to avoid the compounding-rim border.
+  const colour = getDrawingColour();
+  dom.drawingSvgPath.style.fill = colour;
+  dom.drawingSvgPath.style.stroke = "none";
 };
 
 export const moveWhileDrawing = (e: MouseEvent) => {
@@ -154,11 +286,88 @@ export const moveWhileDrawing = (e: MouseEvent) => {
 
   appState.drawingPoints.push([e.pageX, e.pageY]);
 
-  const stroke = getStroke(appState.drawingPoints, {
-    size: appState.penSize * appState.lastMouseDownCameraZ,
-  });
+  const stroke = getStroke(
+    appState.drawingPoints,
+    strokeOptionsFor(appState.penSize * appState.lastMouseDownCameraZ)
+  );
   const pathData = Utils.getSvgPathFromStroke(stroke);
   dom.drawingSvgPath.setAttribute("d", pathData);
+};
+
+// Brush-cursor preview. Rendered as a *native* CSS cursor (an SVG circle data
+// URL) rather than a JS-positioned element: the browser draws the cursor itself,
+// so it tracks the pointer with zero lag (a JS follower always trails by a
+// frame), and changing the `cursor` style on zoom re-renders it immediately even
+// without a mouse move. The circle's diameter is the pen width as it appears on
+// screen (penSize × camera zoom) and its fill is the active draw colour
+// (translucent for the highlighter), so it shows exactly what's about to be
+// drawn. Call this whenever the tool, pen settings, or zoom change.
+export const updatePenCursor = () => {
+  const bg = dom?.background;
+  if (!bg) return;
+  // Only the pencil tool gets the brush cursor; otherwise restore the default
+  // (clearing the inline style hands control back to the element's CSS class).
+  if (appState.currentTool !== eTool.pencil) {
+    bg.style.cursor = "";
+    return;
+  }
+  const z = Number(dom.camera.dataset.z) || 1;
+  // Browsers ignore cursor images larger than ~128px, so clamp the drawn image
+  // to that (hotspot stays centred); at normal sizes/zoom this never triggers.
+  const diameter = Math.min(Math.max(appState.penSize * z, 4), 128);
+  const r = diameter / 2;
+  const hot = Math.round(r);
+  // Use a 6-digit hex fill + separate fill-opacity rather than an 8-digit
+  // #RRGGBBAA colour (or rgba()): a cursor's standalone SVG is parsed as SVG
+  // 1.1, which doesn't understand those and silently falls back to black —
+  // which is why the translucent highlighter cursor came out grey/black.
+  const fillOpacity =
+    appState.penCurrentTool === ePenTool.highlighter
+      ? HIGHLIGHTER_CURSOR_OPACITY
+      : 1;
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${diameter}" height="${diameter}" viewBox="0 0 ${diameter} ${diameter}">` +
+    `<circle cx="${r}" cy="${r}" r="${Math.max(
+      r - 1,
+      0.5
+    )}" fill="${appState.penColour}" fill-opacity="${fillOpacity}" stroke="#505050" stroke-opacity="0.8" stroke-width="1"/>` +
+    `</svg>`;
+  bg.style.cursor = `url("data:image/svg+xml,${encodeURIComponent(
+    svg
+  )}") ${hot} ${hot}, crosshair`;
+};
+
+// Shape variant of moveWhileDrawing: instead of appending the mouse position,
+// recompute the shape's whole perimeter from the start corner to the current
+// corner, and reset the bounding box to that perimeter's extents (freehand
+// accumulates; a shape's box is exact each frame). endDrawing then finalises it
+// identically to a freehand stroke.
+export const moveWhileDrawingShape = (e: MouseEvent) => {
+  const points = buildShapePoints(
+    appState.penCurrentTool,
+    shapeStartX,
+    shapeStartY,
+    e.pageX,
+    e.pageY
+  );
+  appState.drawingPoints = points;
+
+  drawing_tlX = Infinity;
+  drawing_tlY = Infinity;
+  drawing_brX = -Infinity;
+  drawing_brY = -Infinity;
+  for (const [px, py] of points) {
+    if (px < drawing_tlX) drawing_tlX = px;
+    if (py < drawing_tlY) drawing_tlY = py;
+    if (px > drawing_brX) drawing_brX = px;
+    if (py > drawing_brY) drawing_brY = py;
+  }
+
+  const stroke = getStroke(
+    points,
+    strokeOptionsFor(appState.penSize * appState.lastMouseDownCameraZ)
+  );
+  dom.drawingSvgPath.setAttribute("d", Utils.getSvgPathFromStroke(stroke));
 };
 
 export const endDrawing = (e: MouseEvent) => {
@@ -189,9 +398,7 @@ export const endDrawing = (e: MouseEvent) => {
           i[1] / appState.lastMouseDownCameraZ,
         ];
       }),
-    {
-      size: appState.penSize,
-    }
+    strokeOptionsFor(appState.penSize)
   );
 
   const pathValue = Utils.getSvgPathFromStroke(stroke);
@@ -221,6 +428,8 @@ export const endDrawing = (e: MouseEvent) => {
     y: topLeftPos.y - appState.penSize / 2,
     width: width + appState.penSize,
     height: height + appState.penSize,
+    // Pen → solid colour; highlighter → the same colour at ~20% alpha.
+    colour: getDrawingColour(),
   });
 
   // Broadcast + persist the stroke, like the image/text add paths do. Without
@@ -882,6 +1091,16 @@ export const setActiveTool = (tool: eTool) => {
 export const setActiveMeasuringTool = (tool: eMeasuringTool) => {
   appState.currentMeasuringTool = tool;
   deselectObjects();
+};
+
+// Pick which pen behaviour the pencil tool uses (plain pen, highlighter, or one
+// of the shape tools). Also ensures the pencil itself is the active tool so the
+// click that picks a pen behaviour starts drawing with it immediately.
+export const setActivePenTool = (tool: ePenTool) => {
+  appState.penCurrentTool = tool;
+  if (appState.currentTool !== eTool.pencil) {
+    setActiveTool(eTool.pencil);
+  }
 };
 
 export const startMeasuring = (e: MouseEvent) => {
