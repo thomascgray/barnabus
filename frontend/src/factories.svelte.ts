@@ -165,7 +165,11 @@ export const createFreehandSvgElement = (
   pathElement.id = id;
   pathElement.style.zIndex = `${appState.zIndexCounter}`;
   pathElement.style.fill = colour;
-  pathElement.style.stroke = colour;
+  // No stroke: perfect-freehand's `d` is already the filled outline of the whole
+  // stroke, so a CSS stroke just paints a redundant rim. For a translucent
+  // highlighter colour that rim compounds with the fill into a visible darker
+  // border (issue #23), so we rely on the fill alone.
+  pathElement.style.stroke = "none";
   pathElement.dataset.colour = colour;
   pathElement.classList.add(CLASSES.OBJECT, CLASSES.SVG_PATH_OBJECT);
   pathElement.setAttribute("d", pathValue);

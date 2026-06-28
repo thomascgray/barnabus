@@ -17,7 +17,7 @@ import {
   blobToWebP,
   arrayBufferToWebP,
 } from "webp-converter-browser";
-import { eTool } from "./types";
+import { ePenTool, eTool } from "./types";
 
 export const preMouseDown = (e: MouseEvent) => {
   appState.isLeftMouseButtonDown = e.button === 0;
@@ -90,6 +90,16 @@ export const mouse_DOWN = (e: MouseEvent) => {
   e.stopPropagation();
 
   if (appState.isLeftMouseButtonDown) {
+    // drawing — the pencil always draws, even when the click lands on the
+    // background. This MUST come before the camera/background branch below,
+    // which starts a selection-box drag for ANY tool that clicks the
+    // background and would otherwise swallow the mousedown — leaving
+    // startDrawing uncalled and shapes drawing from a stale origin.
+    if (appState.currentTool === eTool.pencil) {
+      Interactions.startDrawing(e);
+      return;
+    }
+
     // clicking on the selection box (this can only happen when we've already selected some objects remember)
     if (
       appState.currentTool === eTool.cursor &&
@@ -155,12 +165,6 @@ export const mouse_DOWN = (e: MouseEvent) => {
       // TODO
     }
 
-    // drawing
-    if (appState.currentTool === eTool.pencil) {
-      Interactions.startDrawing(e);
-      return;
-    }
-
     if (appState.currentTool === eTool.measuring) {
       Interactions.startMeasuring(e);
       return;
@@ -198,7 +202,16 @@ export const mouse_MOVE = (e: MouseEvent) => {
 
   // we're drawing
   if (appState.isLeftMouseButtonDown && appState.currentTool === "pencil") {
-    Interactions.moveWhileDrawing(e);
+    if (
+      appState.penCurrentTool === ePenTool.square ||
+      appState.penCurrentTool === ePenTool.circle ||
+      appState.penCurrentTool === ePenTool.triangle ||
+      appState.penCurrentTool === ePenTool.line
+    ) {
+      Interactions.moveWhileDrawingShape(e);
+    } else {
+      Interactions.moveWhileDrawing(e);
+    }
     return;
   }
 
@@ -433,6 +446,10 @@ const performUIStyleUpdatesForCameraZoom = () => {
   dom.selectedObjectsResizeHandleMR.style.width = `${12 / cameraZ}px`;
   dom.selectedObjectsResizeHandleMR.style.height = `${12 / cameraZ}px`;
   dom.selectedObjectsResizeHandleMR.style.outlineWidth = `${4 / cameraZ}px`;
+
+  // Resize the brush cursor to match the new zoom (its diameter is penSize ×
+  // zoom). camera z isn't reactive state, so this is the imperative hook.
+  Interactions.updatePenCursor();
 };
 
 const performCameraZoom = (xPos: number, yPos: number, distance: number) => {
