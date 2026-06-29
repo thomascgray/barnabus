@@ -21,6 +21,7 @@
   import ResizerHandle from "./components/resizer-handle.svelte";
   import PresenceStrip from "./components/presence-strip.svelte";
   import ImageUploadModal from "./components/image-upload-modal.svelte";
+  import BoardToolsBar from "./components/board-tools-bar.svelte";
 
   // import testDataSet from "../test_data_sets/1.txt";
 
@@ -152,6 +153,7 @@
 <PresenceStrip />
 
 <Toolbar />
+<BoardToolsBar />
 <LeftToolbar />
 
 <PenToolbar />

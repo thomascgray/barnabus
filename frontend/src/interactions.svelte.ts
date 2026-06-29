@@ -785,6 +785,9 @@ export const doPan = (e: MouseEvent) => {
   const deltaX = -e.movementX;
   const deltaY = -e.movementY;
   const [x, y, z] = Utils.getDomElementTransformAsNumbers(dom.camera);
+  // Cancel any in-flight programmatic camera animation (issue #27) so panning
+  // tracks the cursor instantly instead of easing toward each frame.
+  dom.camera.style.transition = "";
   dom.camera.style.transform = `scale(${z}) translate(${x - deltaX / z}px, ${
     y - deltaY / z
   }px)`;

@@ -10,6 +10,7 @@ import {
   ui_popoverMenu,
 } from "./ui_updaters.svelte";
 import { toast } from "./toast.svelte";
+import * as BoardTools from "./board_tools.svelte";
 
 let cameraZ = 1;
 import {
@@ -409,6 +410,8 @@ export const onWheel = (e: WheelEvent) => {
       const [x, y, z] = Utils.getDomElementTransformAsNumbers(dom.camera);
       const newX = x + (e.deltaX * -1) / z;
       const newY = y + (e.deltaY * -1) / z;
+      // Cancel any in-flight programmatic camera animation (issue #27).
+      dom.camera.style.transition = "";
       dom.camera.style.transform = `scale(${z}) translate(${newX}px, ${newY}px)`;
       dom.camera.dataset.x = String(newX);
       dom.camera.dataset.y = String(newY);
@@ -441,6 +444,10 @@ const performUIStyleUpdatesForCameraZoom = () => {
   // Resize the brush cursor to match the new zoom (its diameter is penSize ×
   // zoom). camera z isn't reactive state, so this is the imperative hook.
   Interactions.updatePenCursor();
+
+  // Keep the top board-tools bar's zoom indicator (issue #27) in sync with the
+  // interactive wheel/trackpad zoom.
+  BoardTools.syncZoomIndicator();
 };
 
 const performCameraZoom = (xPos: number, yPos: number, distance: number) => {
@@ -453,6 +460,10 @@ const performCameraZoom = (xPos: number, yPos: number, distance: number) => {
     { x: xPos, y: yPos },
     distance / 100
   );
+
+  // Cancel any in-flight programmatic camera animation (issue #27) so this
+  // interactive zoom applies instantly instead of easing.
+  dom.camera.style.transition = "";
 
   const newTransform = `scale(${newCamera.z}) translate(${newCamera.x}px, ${newCamera.y}px)`;
   dom.camera.style.transform = newTransform;
@@ -518,13 +529,32 @@ export const key_DOWN = (e: KeyboardEvent) => {
   if (e.key === "4") {
     Interactions.setActiveTool(eTool.text);
   }
+
+  // Board-view shortcuts (issue #27) — the discoverable surface for these is the
+  // top board-tools bar; the keys mirror its buttons.
+  if (e.key === "0") {
+    // reset zoom to 100%
+    e.preventDefault();
+    e.stopPropagation();
+    BoardTools.resetZoom();
+  }
   if (e.key === "f") {
-    // TODO need to make this faster
-    // if (appState.selectedElements.length >= 1) {
-    //   e.preventDefault();
-    //   e.stopPropagation();
-    //   flipImage(appState.selectedElements);
-    // }
+    // zoom to fit all objects
+    e.preventDefault();
+    e.stopPropagation();
+    BoardTools.frameAllObjects();
+  }
+  if (e.key === "F") {
+    // shift+f — zoom to the current selection (no-op if nothing is selected)
+    e.preventDefault();
+    e.stopPropagation();
+    BoardTools.frameSelection();
+  }
+  if (e.key === "Home") {
+    // recenter the viewport on canvas (0,0)
+    e.preventDefault();
+    e.stopPropagation();
+    BoardTools.recenterToOrigin();
   }
 
   if (e.key === "g") {
