@@ -17,7 +17,11 @@ import {
   calculateSelectedItemsBoundingBox,
   ui_popoverMenu,
 } from "./ui_updaters.svelte";
-import { deselectObjects } from "./interactions.svelte";
+import {
+  deselectObjects,
+  focusTextBox,
+  selectObjects,
+} from "./interactions.svelte";
 import type { HTMLDivElementWithCustomFuncs } from "./types";
 
 export function createImageElement(args: {
@@ -242,6 +246,17 @@ export const createTextElement = (args: ICreateTextElementArgs) => {
   textAreaElement.value = `${text.replace(/\\n/g, "\n")}`;
   textAreaElement.style.color = color || "black";
   textAreaElement.style.backgroundColor = backgroundColor || "#eee";
+  // Mirror colour/style onto data-* attributes. exportObject reads these
+  // (NOT the inline style), so without them a box created via the factory
+  // (seeded notes, imports, pastes) exports colour/bg/bold/italic as undefined
+  // — the next alterItem (e.g. a width resize) then persists those undefineds
+  // and the box reverts to the default grey on reload (issue #32). Only the
+  // colour-picker handlers used to set these, which is why the loss was
+  // intermittent.
+  textAreaElement.dataset.color = color || "black";
+  textAreaElement.dataset.backgroundColor = backgroundColor || "#eee";
+  textAreaElement.dataset.isBold = String(isBold);
+  textAreaElement.dataset.isItalic = String(isItalic);
   textAreaElement.style.padding = "0.4em";
   textAreaElement.classList.add("outline-none");
   if (isBold) {
@@ -301,14 +316,25 @@ export const createTextElement = (args: ICreateTextElementArgs) => {
     const realHeight = height / scale / cameraZ;
 
     textAreaElement.style.height = realHeight + "px";
-    textAreaElement.dataset.height = height.toString();
-    textAreaElement.dataset.heightB = height.toString();
+    // Store the camera-adjusted (world-space) height, exactly as width above is
+    // divided by cameraZ. The old code stored the raw `height`, so when a box
+    // was created while zoomed (cameraZ !== 1) data-height disagreed with the
+    // rendered height by a factor of cameraZ. The selection wrapper sizes itself
+    // from data-height, so it came out the wrong height — short and detached
+    // from the textarea (issue #32).
+    textAreaElement.dataset.height = (height / cameraZ).toString();
+    textAreaElement.dataset.heightB = (height / cameraZ).toString();
 
     if (focusOnCreation) {
-      // textAreaElement.focus();
-      // selectObjects([textAreaElement]);
-      // calculateSelectedItemsBoundingBox();
-      // ui_popoverMenu();
+      // A freshly-placed text box should be ready to type into immediately:
+      // select it (so the bounding box + popover appear) and focus the textarea
+      // (focusTextBox also drops the selection wrapper's pointer-events so the
+      // click-through to the textarea works). Done here, inside the deferred
+      // sizing, so the bounding box reads the final width/height (issue #32).
+      selectObjects([textAreaElement]);
+      calculateSelectedItemsBoundingBox();
+      ui_popoverMenu();
+      focusTextBox(textAreaElement);
     }
   });
 
