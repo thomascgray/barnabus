@@ -121,6 +121,7 @@
     type="color"
     class="invisible w-0 h-0 !-mr-[8px]"
     oninput={(e) => Interactions.changeTextColor(e)}
+    onchange={() => Interactions.commitSelectedTextStyle()}
   />
 
   <!-- the text background colour -->
@@ -148,5 +149,6 @@
     type="color"
     class="invisible w-0 h-0 !-mr-[8px]"
     oninput={(e) => Interactions.changeTextBackgroundColor(e)}
+    onchange={() => Interactions.commitSelectedTextStyle()}
   />
 </div>

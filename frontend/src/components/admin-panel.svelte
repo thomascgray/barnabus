@@ -10,12 +10,18 @@
     setAdminSecret,
   } from "../admin.svelte";
 
+  // Joining is owned by Landing (it drives the connection + invite screen + URL),
+  // so the panel just hands it the board. Landing connects straight through for
+  // open boards and falls back to the invite screen for passphrase-gated ones.
+  let { onJoin }: { onJoin: (board: BoardMeta) => void } = $props();
+
   type BoardMeta = {
     id: string;
     name: string;
     createdBy: string;
     createdAt: number;
     updatedAt: number;
+    hasPassphrase: boolean;
   };
 
   // The secret typed into the unlock field. Seeded from the remembered secret so
@@ -179,6 +185,9 @@
           </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
+          <button class="px-3 py-1 text-sm bg-slate-800 text-white rounded-md" onclick={() => onJoin(b)}>
+            Join
+          </button>
           <button class="px-2 py-1 text-sm border border-slate-300 rounded-md" onclick={() => copyLink(b.id)}>
             Copy link
           </button>

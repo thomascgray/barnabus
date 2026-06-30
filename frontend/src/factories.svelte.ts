@@ -18,6 +18,7 @@ import {
   ui_popoverMenu,
 } from "./ui_updaters.svelte";
 import {
+  broadcastObjects,
   deselectObjects,
   focusTextBox,
   selectObjects,
@@ -352,6 +353,18 @@ export const createTextElement = (args: ICreateTextElementArgs) => {
     Utils.relcalculateTextAreaHeight(textAreaElement);
     calculateSelectedItemsBoundingBox();
     ui_popoverMenu();
+  };
+
+  // Broadcast + persist the typed text when the box loses focus (gesture-end,
+  // matching the rest of the sync contract). Without this, content edits are
+  // local-only and lost on reload until some other gesture re-exports the
+  // element (issue #32). `deselectObjects` blurs the box, so this is the commit
+  // point for both clicking away and pressing Escape. Skip empty boxes so a
+  // text-tool click the user abandons doesn't litter the board with blank
+  // textareas (`alterItem` write-through would otherwise persist them).
+  textAreaElement.onblur = () => {
+    if (textAreaElement.value.trim() === "") return;
+    broadcastObjects([textAreaElement]);
   };
 
   document.getElementById("objects")!.appendChild(textAreaElement);

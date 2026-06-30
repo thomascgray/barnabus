@@ -132,8 +132,9 @@ export const exportObject = (obj: HTMLElement | SVGElement): Object => {
 };
 
 export const importObject = (json: any) => {
+  let el: HTMLElement | SVGElement | undefined;
   if (json.type === "image") {
-    return createImageElement({
+    el = createImageElement({
       id: json.id || undefined,
       src: json.src,
       width: json.width,
@@ -144,7 +145,7 @@ export const importObject = (json: any) => {
     });
   }
   if (json.type === "text") {
-    return createTextElement({
+    el = createTextElement({
       id: json.id || undefined,
       text: json.text,
       x: json.x,
@@ -162,7 +163,7 @@ export const importObject = (json: any) => {
     });
   }
   if (json.type === "svg") {
-    return createFreehandSvgElement({
+    el = createFreehandSvgElement({
       id: json.id || undefined,
       pathValue: json.pathValue,
       x: json.x,
@@ -173,6 +174,14 @@ export const importObject = (json: any) => {
       colour: json.colour,
     });
   }
+  // Anything imported is, by definition, already known to the server/peers
+  // (a joinResponse object, a remote addItem, or a paste/duplicate that sends
+  // its own explicit addItem). Mark it synced so a later edit broadcasts an
+  // alterItem rather than a duplicate addItem. Brand-new objects created
+  // straight from the factories (e.g. placeTextObject) leave this unset, so
+  // their first broadcast is an addItem (see broadcastObjects).
+  if (el) el.dataset.synced = "true";
+  return el;
 };
 
 // a function that takes all the objects and turns them into json
@@ -218,6 +227,10 @@ export const showImagePreview = (preview: {
   });
   el.classList.add(CLASSES.IMAGE_PREVIEW);
   el.dataset.preview = "true";
+  // This is a remote object (another client owns it), so it's already known to
+  // the server/peers — mark it synced so if we later edit it after the real
+  // image lands, we broadcast an alterItem rather than a duplicate addItem.
+  el.dataset.synced = "true";
   // Not a real board object yet — keep it out of selection/drag interactions.
   el.style.pointerEvents = "none";
 };

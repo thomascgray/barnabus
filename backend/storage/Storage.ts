@@ -21,6 +21,9 @@ export interface BoardMeta {
   createdBy: string;
   createdAt: number;
   updatedAt: number;
+  // Whether the board is passphrase-gated. Derived from the (never-exposed)
+  // passphrase hash so clients can skip the passphrase prompt for open boards.
+  hasPassphrase: boolean;
 }
 
 export interface Storage {

@@ -52,6 +52,24 @@ reload.
 Broadcasts are emitted at the **end of a gesture** (mouse-up), not per-frame:
 others see the finished move/resize, not the live drag.
 
+**Route every object broadcast through `broadcastObjects(els)`** (in
+`interactions.svelte.ts`). It picks `addItem` vs `alterItem` per element from a
+`data-synced` flag: the **first** broadcast of an object the server/peers have
+never seen is an `addItem`, every later one an `alterItem`. Brand-new factory
+objects (e.g. `placeTextObject` makes an empty box you type into) start
+**unsynced**, so whichever edit fires first — blur/colour/bold/italic/drag/
+resize — introduces them. `importObject` marks everything it creates
+`synced` (joinResponse, remote `addItem`, paste/duplicate), so editing an
+imported object never re-adds it. Don't hand-roll `sendMessage({type:"addItem"…})`
+for object lifecycle; if you do, the object stays unsynced and a later edit
+duplicate-adds it. (Mid-upload images are skipped — they'd leak a base64 `src`.)
+
+Text-box edits were the original miss here (issue #32): colour/bg/bold/italic/
+typed-text mutated the DOM but never broadcast, so they only persisted when a
+*later* resize happened to re-export the element. The colour pickers update the
+DOM live on `oninput` but only broadcast on `change` (commit) to avoid flooding
+the socket per swatch-drag frame.
+
 ## Adding a synced field: the export/import/update/factory quadrilateral
 
 To make a new property on an object type sync and persist, thread it through

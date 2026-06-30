@@ -49,6 +49,7 @@ export class JsonStorage implements Storage {
     createdBy: "",
     createdAt: 0,
     updatedAt: 0,
+    hasPassphrase: false, // the single legacy board is always open
   };
 
   createBoard(): BoardMeta {

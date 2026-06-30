@@ -98,6 +98,25 @@
     });
   };
 
+  // Joining one of your own admin boards: open boards connect straight through
+  // (no point showing the invite/passphrase screen). Passphrase-gated boards
+  // still need the passphrase, so fall back to the invite screen which prompts
+  // for it — as does the case where no username is set yet.
+  const joinAdminBoard = (b: {
+    id: string;
+    name: string;
+    hasPassphrase: boolean;
+  }) => {
+    if (b.hasPassphrase || !username.trim()) return goToInvite(b.id);
+    if (connecting) return;
+    ConnectionManager.connect({
+      boardId: b.id,
+      boardName: b.name,
+      passphrase: "",
+      name: username.trim(),
+    });
+  };
+
   const copyLink = async (id: string) => {
     try {
       await navigator.clipboard.writeText(joinLink(id));
@@ -225,7 +244,7 @@
 
       <!-- admin (inline) -->
       <div class="mt-8">
-        <AdminPanel />
+        <AdminPanel onJoin={joinAdminBoard} />
       </div>
     </div>
   </div>

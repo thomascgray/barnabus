@@ -740,10 +740,8 @@ export const addImageFromBlob = async (
     el.classList.remove(CLASSES.IMAGE_UPLOADING);
     // Only now sync — so the persisted/broadcast src is the URL, not the blob.
     // Others swap their blurry placeholder for this real image (same id).
-    ConnectionManager.sendMessage({
-      type: "addItem",
-      payload: { object: exportObject(el) },
-    });
+    // First broadcast → addItem (broadcastObjects decides via data-synced).
+    Interactions.broadcastObjects([el]);
     toast("Image added", "success");
   } catch (err) {
     console.error("Image upload failed", err);

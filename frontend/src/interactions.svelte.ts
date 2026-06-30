@@ -434,13 +434,9 @@ export const endDrawing = (e: MouseEvent) => {
 
   // Broadcast + persist the stroke, like the image/text add paths do. Without
   // this the drawing is local-only and never reaches other clients or storage.
+  // First broadcast → addItem (broadcastObjects decides via data-synced).
   if (svgElement) {
-    ConnectionManager.sendMessage({
-      type: "addItem",
-      payload: {
-        object: exportObject(svgElement),
-      },
-    });
+    broadcastObjects([svgElement]);
   }
 
   // we're done drawing, reset stuff
@@ -537,13 +533,10 @@ export const resizeFunctions = {
 
     calculateSelectedItemsBoundingBox();
 
-    // Broadcast + persist the new size/position to other clients.
-    for (let elem of appState.selectedObjects) {
-      ConnectionManager.sendMessage({
-        type: "alterItem",
-        payload: { object: exportObject(elem) },
-      });
-    }
+    // Broadcast + persist the new size/position to other clients. Via
+    // broadcastObjects so a brand-new text box resized before its first
+    // blur/edit is introduced as an addItem rather than a no-op alterItem.
+    broadcastObjects(appState.selectedObjects);
 
     appState.isResizingBR = false;
   },
@@ -588,13 +581,10 @@ export const resizeFunctions = {
       el.dataset.widthB = el.dataset.width;
     });
 
-    // Broadcast + persist the new width/position to other clients.
-    for (let elem of appState.selectedObjects) {
-      ConnectionManager.sendMessage({
-        type: "alterItem",
-        payload: { object: exportObject(elem) },
-      });
-    }
+    // Broadcast + persist the new width/position to other clients. Via
+    // broadcastObjects so a brand-new text box resized before its first
+    // blur/edit is introduced as an addItem rather than a no-op alterItem.
+    broadcastObjects(appState.selectedObjects);
 
     appState.isResizingMR = false;
   },
@@ -813,40 +803,86 @@ export const increaseGridSize = (els: HTMLElement[]) => {
     });
 };
 
-export const toggleSelectedTextBold = () => {
-  appState.selectedObjects
-    .filter((el) => el.classList.contains(CLASSES.TEXT_OBJECT))
-    .forEach((el) => {
-      if (el.dataset.isBold === "true") {
-        el.classList.remove("font-bold");
-        el.dataset.isBold = "false";
-        Utils.relcalculateTextAreaHeight(el as HTMLTextAreaElement);
-        return;
-      } else {
-        el.classList.add("font-bold");
-        el.dataset.isBold = "true";
-        Utils.relcalculateTextAreaHeight(el as HTMLTextAreaElement);
-        return;
-      }
+// Broadcast + persist the current state of the given object elements. Style /
+// content edits update only the local DOM, so without this the change is
+// local-only and silently lost on reload until some *other* gesture (a move /
+// resize) happens to re-export the element (issue #32 — text bg colour, bold,
+// italic, and typed text were not being saved).
+//
+// The first broadcast of an element the server/peers have never seen is sent as
+// an `addItem`, every subsequent one as an `alterItem`. This matters for text
+// boxes: `placeTextObject` creates them straight from the factory with no
+// broadcast (you type into an empty box first), so the first edit/blur is what
+// introduces them to everyone else. Without the addItem, live peers' `updateObject`
+// no-ops on the unknown id and the box only appears for them after a reload.
+// Imported objects are pre-marked `data-synced` (see importObject), so editing
+// one never re-adds it.
+export const broadcastObjects = (els: (HTMLElement | SVGElement)[]) => {
+  for (const el of els) {
+    // An image still uploading carries a base64 `src` we must never put on the
+    // wire (the upload path swaps in the URL, then broadcasts). Skip it; its
+    // own completion handler broadcasts the real addItem.
+    if (el.classList.contains(CLASSES.IMAGE_UPLOADING)) continue;
+    const isNew = el.dataset.synced !== "true";
+    el.dataset.synced = "true";
+    ConnectionManager.sendMessage({
+      type: isNew ? "addItem" : "alterItem",
+      payload: { object: exportObject(el) },
     });
+  }
+};
+
+export const toggleSelectedTextBold = () => {
+  const textEls = appState.selectedObjects.filter((el) =>
+    el.classList.contains(CLASSES.TEXT_OBJECT)
+  );
+  textEls.forEach((el) => {
+    if (el.dataset.isBold === "true") {
+      el.classList.remove("font-bold");
+      el.dataset.isBold = "false";
+    } else {
+      el.classList.add("font-bold");
+      el.dataset.isBold = "true";
+    }
+    Utils.relcalculateTextAreaHeight(el as HTMLTextAreaElement);
+  });
+  broadcastObjects(textEls);
 };
 
 export const toggleSelectedTextItalic = () => {
-  appState.selectedObjects
-    .filter((el) => el.classList.contains(CLASSES.TEXT_OBJECT))
-    .forEach((el) => {
-      if (el.dataset.isItalic === "true") {
-        el.classList.remove("italic");
-        el.dataset.isItalic = "false";
-        Utils.relcalculateTextAreaHeight(el as HTMLTextAreaElement);
-        return;
-      } else {
-        el.classList.add("italic");
-        el.dataset.isItalic = "true";
-        Utils.relcalculateTextAreaHeight(el as HTMLTextAreaElement);
-        return;
-      }
-    });
+  const textEls = appState.selectedObjects.filter((el) =>
+    el.classList.contains(CLASSES.TEXT_OBJECT)
+  );
+  textEls.forEach((el) => {
+    if (el.dataset.isItalic === "true") {
+      el.classList.remove("italic");
+      el.dataset.isItalic = "false";
+    } else {
+      el.classList.add("italic");
+      el.dataset.isItalic = "true";
+    }
+    Utils.relcalculateTextAreaHeight(el as HTMLTextAreaElement);
+  });
+  broadcastObjects(textEls);
+};
+
+// The colour pickers fire `input` continuously as the swatch is dragged, so we
+// only update the local DOM here (live preview) and defer the broadcast to the
+// `change` event (commit) via `commitSelectedTextStyle` — otherwise we'd flood
+// the socket with an alterItem per pointer move. The colour input's `change`
+// event is NOT a reliable commit signal: on macOS the native colour panel only
+// fires `change` when the panel is dismissed, so a user who picks a colour and
+// reloads (or just leaves the panel open) never commits. So we broadcast from
+// the live `input` handler, debounced, which is guaranteed to fire (it's what
+// paints the colour locally). `change` still calls commit for an immediate
+// final write.
+let textStyleCommitTimer: ReturnType<typeof setTimeout> | undefined;
+const scheduleTextStyleCommit = () => {
+  if (textStyleCommitTimer) clearTimeout(textStyleCommitTimer);
+  textStyleCommitTimer = setTimeout(() => {
+    textStyleCommitTimer = undefined;
+    commitSelectedTextStyle();
+  }, 150);
 };
 
 export const changeTextColor = (e: Event) => {
@@ -859,6 +895,7 @@ export const changeTextColor = (e: Event) => {
     });
 
   ui_popoverMenu();
+  scheduleTextStyleCommit();
 };
 
 export const changeTextBackgroundColor = (e: Event) => {
@@ -871,6 +908,22 @@ export const changeTextBackgroundColor = (e: Event) => {
     });
 
   ui_popoverMenu();
+  scheduleTextStyleCommit();
+};
+
+// Broadcast + persist the selected text objects' current style. Called from the
+// debounced `input` path and from the colour picker's `change` (commit) event,
+// so colour edits survive a reload even if `change` never fires.
+export const commitSelectedTextStyle = () => {
+  if (textStyleCommitTimer) {
+    clearTimeout(textStyleCommitTimer);
+    textStyleCommitTimer = undefined;
+  }
+  broadcastObjects(
+    appState.selectedObjects.filter((el) =>
+      el.classList.contains(CLASSES.TEXT_OBJECT)
+    )
+  );
 };
 
 export const placeTextObject = (e: MouseEvent) => {
@@ -1006,16 +1059,11 @@ export const endDraggingObjects = (e: MouseEvent) => {
     }
   }
 
-  // strictly speaking this gets handled when moving; but this is just in case
+  // strictly speaking this gets handled when moving; but this is just in case.
+  // Via broadcastObjects so a brand-new text box dragged before its first
+  // blur/edit is introduced as an addItem rather than a no-op alterItem.
   calculateSelectedItemsBoundingBox();
-  for (let elem of appState.selectedObjects) {
-    ConnectionManager.sendMessage({
-      type: "alterItem",
-      payload: {
-        object: exportObject(elem),
-      },
-    });
-  }
+  broadcastObjects(appState.selectedObjects);
 
   appState.isDraggingObjects = false;
 };
@@ -1041,13 +1089,17 @@ export const spawnObjectsFromExports = (exports: any[]): HTMLElement[] => {
   if (newObjects.length === 0) return [];
 
   deselectObjects();
-  selectObjects(newObjects);
-  calculateSelectedItemsBoundingBox();
 
-  // Defer the sync one tick: text objects get their width/height set in a
-  // setTimeout by the factory, so exporting them synchronously would broadcast
-  // NaN sizes. By the time this fires, those dataset values are populated.
+  // Defer one tick: text objects get their width/height/data-* set in a
+  // setTimeout by the factory, so doing this synchronously would (a) size the
+  // selection wrapper + resize handles from NaN dataset values — leaving the
+  // new object only "sort of" selected with a wrong-sized box — and (b)
+  // broadcast NaN sizes. By the time this fires, those dataset values are
+  // populated, so the duplicate ends up properly selected and correctly sized.
   setTimeout(() => {
+    selectObjects(newObjects);
+    calculateSelectedItemsBoundingBox();
+    ui_popoverMenu();
     newObjects.forEach((obj) => {
       ConnectionManager.sendMessage({
         type: "addItem",
@@ -1197,12 +1249,8 @@ export const addImageFromUrl = (
       y: spawnPoint.y - height / 2,
     });
 
-    ConnectionManager.sendMessage({
-      type: "addItem",
-      payload: {
-        object: exportObject(domObj),
-      },
-    });
+    // First broadcast → addItem (broadcastObjects decides via data-synced).
+    broadcastObjects([domObj]);
 
     toast("Image added", "success");
   };

@@ -44,15 +44,15 @@ export class SqliteStorage implements Storage {
          VALUES (?, ?, ?, ?, ?, ?)`
       )
       .run(id, input.name, hash, createdBy, now, now);
-    return { id, name: input.name, createdBy, createdAt: now, updatedAt: now };
+    return { id, name: input.name, createdBy, createdAt: now, updatedAt: now, hasPassphrase: hash !== "" };
   }
 
   listBoards(): BoardMeta[] {
     return this.db
       .query<
-        { id: string; name: string; created_by: string; created_at: number; updated_at: number },
+        { id: string; name: string; created_by: string; created_at: number; updated_at: number; passphrase_hash: string },
         []
-      >(`SELECT id, name, created_by, created_at, updated_at FROM boards ORDER BY created_at DESC`)
+      >(`SELECT id, name, created_by, created_at, updated_at, passphrase_hash FROM boards ORDER BY created_at DESC`)
       .all()
       .map((r) => ({
         id: r.id,
@@ -60,15 +60,16 @@ export class SqliteStorage implements Storage {
         createdBy: r.created_by,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
+        hasPassphrase: r.passphrase_hash !== "",
       }));
   }
 
   getBoard(boardId: string): BoardMeta | null {
     const r = this.db
       .query<
-        { id: string; name: string; created_by: string; created_at: number; updated_at: number },
+        { id: string; name: string; created_by: string; created_at: number; updated_at: number; passphrase_hash: string },
         [string]
-      >(`SELECT id, name, created_by, created_at, updated_at FROM boards WHERE id = ?`)
+      >(`SELECT id, name, created_by, created_at, updated_at, passphrase_hash FROM boards WHERE id = ?`)
       .get(boardId);
     return r
       ? {
@@ -77,6 +78,7 @@ export class SqliteStorage implements Storage {
           createdBy: r.created_by,
           createdAt: r.created_at,
           updatedAt: r.updated_at,
+          hasPassphrase: r.passphrase_hash !== "",
         }
       : null;
   }
