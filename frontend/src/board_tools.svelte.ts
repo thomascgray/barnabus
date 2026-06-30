@@ -22,6 +22,10 @@ import { toast } from "./toast.svelte";
 const ZOOM_MIN = 0.05;
 const ZOOM_MAX = 10;
 
+// Relative zoom change for one `+`/`-` step (button or keyboard). Matches the
+// per-notch feel of the mouse-wheel zoom (distance 20 → dz 0.2 in onWheel).
+const ZOOM_STEP = 0.2;
+
 // Programmatic camera moves ease instead of teleporting, so "where did my view
 // go?" reads as a glide. Matches the easing used for remote object updates.
 const ANIM_MS = 320;
@@ -217,4 +221,50 @@ export const frameSelection = () => {
   const box = getBoundingBox(appState.selectedObjects);
   if (!box) return;
   frameBox(box);
+};
+
+// Zoom one step about the viewport centre, easing via the shared animated path.
+// Reuses calculateNewCamera (the same delta-zoom math the wheel-zoom uses), so
+// the clamp and the keep-the-anchored-point-still behaviour match. `dz > 0`
+// zooms out and `dz < 0` zooms in (see calculateNewCamera: z*(1 - dz)).
+const stepZoomAboutCentre = (dz: number) => {
+  const x = Number(dom.camera.dataset.x);
+  const y = Number(dom.camera.dataset.y);
+  const z = Number(dom.camera.dataset.z) || 1;
+  const centre = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+  const next = Utils.calculateNewCamera(x, y, z, centre, dz);
+  applyCamera(next.x, next.y, next.z, true);
+};
+
+// `+` step button / shortcut — zoom in one notch about the viewport centre.
+export const zoomIn = () => stepZoomAboutCentre(-ZOOM_STEP);
+
+// `-` step button / shortcut — zoom out one notch about the viewport centre.
+export const zoomOut = () => stepZoomAboutCentre(ZOOM_STEP);
+
+// Set an exact zoom % (typed into the indicator) about the viewport centre,
+// keeping what you're looking at pinned and easing into the new zoom. The value
+// is clamped to the camera-z range; a non-finite value is a no-op so a bad typed
+// value falls back to the current zoom (the indicator just re-shows it).
+export const setZoomPercent = (percent: number) => {
+  if (!Number.isFinite(percent)) return;
+  zoomAboutScreenPoint(
+    percent / 100,
+    window.innerWidth / 2,
+    window.innerHeight / 2
+  );
+};
+
+// Pan so a world-space point sits at the viewport centre, keeping the current
+// zoom. Used by the minimap's click/drag-to-jump (animate off so dragging is
+// responsive); reuses the same camera funnel + UI re-sync as everything here.
+export const jumpToWorldPoint = (
+  cx: number,
+  cy: number,
+  animate = false
+) => {
+  const z = Number(dom.camera.dataset.z) || 1;
+  const newX = window.innerWidth / 2 / z - cx;
+  const newY = window.innerHeight / 2 / z - cy;
+  applyCamera(newX, newY, z, animate);
 };

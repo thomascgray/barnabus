@@ -17,6 +17,50 @@
   };
 
   const hasSelection = $derived(appState.selectedObjects.length > 0);
+
+  // Click-to-type an exact zoom %. The indicator swaps to a text input; Enter
+  // commits (clamped to the camera-z range in setZoomPercent), Escape cancels,
+  // blur commits. A non-numeric value is rejected and falls back to the current
+  // zoom (the indicator just re-shows it).
+  let isEditingZoom = $state(false);
+  let zoomInput = $state("");
+
+  const startEditingZoom = () => {
+    zoomInput = String(boardToolsState.zoomPercent);
+    isEditingZoom = true;
+  };
+
+  const commitZoom = () => {
+    if (!isEditingZoom) return;
+    isEditingZoom = false;
+    const parsed = parseFloat(zoomInput);
+    if (Number.isFinite(parsed)) {
+      BoardTools.setZoomPercent(parsed);
+    }
+  };
+
+  const cancelEditingZoom = () => {
+    isEditingZoom = false;
+  };
+
+  // Stop canvas keyboard shortcuts (Listeners.key_DOWN on window) from firing
+  // while typing into the zoom field; handle our own Enter/Escape.
+  const onZoomKeydown = (e: KeyboardEvent) => {
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitZoom();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cancelEditingZoom();
+    }
+  };
+
+  // Focus + select the input as soon as it renders.
+  const autofocus = (node: HTMLInputElement) => {
+    node.focus();
+    node.select();
+  };
 </script>
 
 <div
@@ -26,13 +70,49 @@
   <div
     class="p-2 mt-4 rounded-full flex flex-row items-center space-x-2 bg-slate-600 pointer-events-none"
   >
-    <!-- zoom level indicator — click to reset zoom to 100% -->
+    <!-- zoom step out (-) -->
     <button
-      onmousedown={action(BoardTools.resetZoom)}
-      title="Reset zoom to 100%"
-      class="board-tools-button min-w-[3.75rem] px-3 py-2 rounded-full bg-slate-400 hover:bg-slate-300 hover:scale-110 active:scale-95 pointer-events-auto text-sm font-semibold text-slate-800 tabular-nums text-center"
+      onmousedown={action(BoardTools.zoomOut)}
+      title="Zoom out (-)"
+      aria-label="Zoom out"
+      class="board-tools-button w-8 h-8 flex items-center justify-center rounded-full bg-slate-400 hover:bg-slate-300 hover:scale-110 active:scale-95 pointer-events-auto text-slate-800 text-lg font-semibold leading-none"
     >
-      {boardToolsState.zoomPercent}%
+      &minus;
+    </button>
+
+    <!-- zoom level indicator — click to type an exact zoom % -->
+    {#if isEditingZoom}
+      <div
+        class="min-w-[3.75rem] px-2 py-2 rounded-full bg-slate-200 flex items-center pointer-events-auto"
+      >
+        <input
+          use:autofocus
+          bind:value={zoomInput}
+          onkeydown={onZoomKeydown}
+          onblur={commitZoom}
+          inputmode="numeric"
+          class="w-10 bg-transparent text-sm font-semibold text-slate-800 tabular-nums text-right outline-none"
+        />
+        <span class="text-sm font-semibold text-slate-800">%</span>
+      </div>
+    {:else}
+      <button
+        onmousedown={action(startEditingZoom)}
+        title="Click to set an exact zoom %"
+        class="board-tools-button min-w-[3.75rem] px-3 py-2 rounded-full bg-slate-400 hover:bg-slate-300 hover:scale-110 active:scale-95 pointer-events-auto text-sm font-semibold text-slate-800 tabular-nums text-center"
+      >
+        {boardToolsState.zoomPercent}%
+      </button>
+    {/if}
+
+    <!-- zoom step in (+) -->
+    <button
+      onmousedown={action(BoardTools.zoomIn)}
+      title="Zoom in (+)"
+      aria-label="Zoom in"
+      class="board-tools-button w-8 h-8 flex items-center justify-center rounded-full bg-slate-400 hover:bg-slate-300 hover:scale-110 active:scale-95 pointer-events-auto text-slate-800 text-lg font-semibold leading-none"
+    >
+      +
     </button>
 
     <!-- frame all objects (zoom to fit) -->

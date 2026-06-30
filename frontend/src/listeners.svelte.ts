@@ -564,12 +564,24 @@ export const key_DOWN = (e: KeyboardEvent) => {
       Interactions.toggleGrid(appState.selectedObjects);
     }
   }
-  if (e.key === "+") {
-    if (appState.selectedObjects.length >= 1) {
+  // Zoom-step shortcuts (issue #29), mirroring the bar's −/+ buttons. "+" keeps
+  // its existing grid-size role while objects are selected; otherwise it (and
+  // "=", so no Shift is needed) steps the zoom in. "-"/"_" steps out.
+  if (e.key === "+" || e.key === "=") {
+    if (e.key === "+" && appState.selectedObjects.length >= 1) {
       e.preventDefault();
       e.stopPropagation();
       Interactions.increaseGridSize(appState.selectedObjects);
+    } else {
+      e.preventDefault();
+      e.stopPropagation();
+      BoardTools.zoomIn();
     }
+  }
+  if (e.key === "-" || e.key === "_") {
+    e.preventDefault();
+    e.stopPropagation();
+    BoardTools.zoomOut();
   }
 
   if (e.key === "d" || e.key === "D") {
