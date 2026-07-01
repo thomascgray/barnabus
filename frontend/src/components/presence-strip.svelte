@@ -12,7 +12,7 @@
 </script>
 
 <div
-  class="fixed top-0 right-0 z-[9999999999] m-3 flex items-center gap-3 bg-white/90 backdrop-blur rounded-full shadow px-3 py-1.5 text-sm"
+  class="fixed top-0 right-0 z-[9999999999] m-3 flex items-center gap-3 bg-white/90 backdrop-blur-sm rounded-full shadow-sm px-3 py-1.5 text-sm"
 >
   <span class="font-semibold text-slate-700 max-w-[12rem] truncate">
     {cmState.boardName ?? "Board"}

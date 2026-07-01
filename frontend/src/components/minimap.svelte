@@ -55,7 +55,7 @@
 {#if minimapState.hasObjects}
   <div
     id="minimap-wrapper"
-    class="absolute right-0 bottom-0 m-3 rounded-lg overflow-hidden bg-slate-700/80 backdrop-blur shadow-lg ring-1 ring-black/20 pointer-events-auto"
+    class="absolute right-0 bottom-0 m-3 rounded-lg overflow-hidden bg-slate-700/80 backdrop-blur-sm shadow-lg ring-1 ring-black/20 pointer-events-auto"
     style="width: {MINIMAP_W}px; height: {MINIMAP_H}px;"
     title="Minimap — click or drag to jump the camera"
   >

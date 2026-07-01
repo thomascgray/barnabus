@@ -160,6 +160,10 @@ export const importObject = (json: any) => {
       scale: json.scale,
       isBold: json.isBold,
       isItalic: json.isItalic,
+      // Exported width/height/fontSize are already world-space; don't let the
+      // factory re-divide them by the current camera zoom (that blew duplicates
+      // up by 1/cameraZ when zoomed out).
+      dimensionsAreWorldSpace: true,
     });
   }
   if (json.type === "svg") {

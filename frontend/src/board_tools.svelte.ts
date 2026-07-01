@@ -268,3 +268,25 @@ export const jumpToWorldPoint = (
   const newY = window.innerHeight / 2 / z - cy;
   applyCamera(newX, newY, z, animate);
 };
+
+// Read the current camera transform straight off the DOM (the source of truth).
+// Used by per-canvas camera memory (canvases.svelte.ts) to snapshot the view of
+// the canvas you're leaving.
+export const readCamera = (): { x: number; y: number; z: number } => ({
+  x: Number(dom.camera.dataset.x) || 0,
+  y: Number(dom.camera.dataset.y) || 0,
+  z: Number(dom.camera.dataset.z) || 1,
+});
+
+// Set the camera to an exact transform via the same funnel as every other
+// programmatic move (writes transform + dataset, re-syncs the zoom indicator and
+// selection chrome). `animate` defaults off — restoring a remembered view should
+// snap into place, since the canvas's objects were swapped in instantly.
+export const setCamera = (
+  x: number,
+  y: number,
+  z: number,
+  animate = false
+) => {
+  applyCamera(x, y, z, animate);
+};

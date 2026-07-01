@@ -182,7 +182,7 @@
             <img
               src={previewUrl}
               alt="preview"
-              class="w-14 h-14 object-cover rounded bg-slate-100 shrink-0"
+              class="w-14 h-14 object-cover rounded-sm bg-slate-100 shrink-0"
             />
           {/if}
           <span class="text-sm text-slate-600 truncate flex-1"
