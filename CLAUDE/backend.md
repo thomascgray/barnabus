@@ -15,15 +15,29 @@ the root `types.ts`, imported by both ends. **When changing what syncs, edit
 `types.ts` first** and let both sides follow. Board objects are
 `Object = Object_Image | Object_Text | Object_SVG`.
 
-## Rooms & broadcasting
+## Rooms, canvases & broadcasting
 
-- **One socket = one board.** The board is bound at `join` (`socketBoard[id]`).
-  Packets after join carry no `boardId` — the server already knows the socket's
-  room.
-- **Broadcasts are room-scoped.** `addItem`/`alterItem`/`removeItem`/`diceRoll`
-  go only to *sibling* sockets in the **same** board.
-- **The sender never receives its own mutation back** — clients apply their own
-  changes optimistically.
+- **One socket = one board + one canvas.** The board is bound at `join`
+  (`socketBoard[id]`); a board holds **many canvases** (issue #26) and the socket
+  is also bound to the canvas it's viewing (`socketCanvas[id]`). Packets after
+  join carry no `boardId`/`canvasId` — the server already knows both from the
+  socket.
+- **Object mutations are canvas-scoped.** `addItem`/`alterItem`/`removeItem` (and
+  the transient `imagePreview`) broadcast only to siblings viewing the **same
+  canvas** (`socketsInCanvas`) and persist under `(board, canvas)`. Two clients on
+  different canvases of the same room never see each other's object edits.
+- **Presence and dice are room-wide.** `memberJoined`/`memberLeft`/`diceRoll` and
+  the `canvasList` broadcast span every canvas in the board (`socketsInRoom`) —
+  switching canvas doesn't change who's "here" or interrupt shared dice.
+- **Canvas ops** (`switchCanvas`/`createCanvas`/`renameCanvas`/`deleteCanvas`):
+  the client mints new canvas ids (like object ids). The server replies to the
+  actor with `canvasState` (the target canvas's objects) and broadcasts
+  `canvasList` to the whole room. Guards: never delete a board's **first** canvas
+  (min position) or its **last** remaining one; anyone viewing a deleted canvas is
+  force-moved to the first via `canvasState`.
+- **The sender never receives its own object mutation back** — clients apply their
+  own changes optimistically. (Canvas ops *do* echo `canvasState`/`canvasList` to
+  the actor, since it needs the new objects/list.)
 - Liveness: ping every 30s, drop a client with no pong within 5s.
 
 ## Boards & auth
@@ -57,12 +71,19 @@ them and broadcasts `memberLeft`. A board with nobody on it has an empty list.
   Postgres) would widen these to `Promise`s.
 - `SqliteStorage` is the real implementation; `JsonStorage` is the legacy
   single-board behavior kept behind the same interface.
-- **One row per object**, keyed by `(board_id, id)`, upserted per mutation —
-  matches the per-object `addItem`/`alterItem` write pattern (no whole-board
-  rewrites). Schema changes go through the ordered migration runner
-  (`storage/migrations.ts`).
-- Deleting a board cascades its object rows (FK `ON DELETE CASCADE`, with
-  `PRAGMA foreign_keys = ON`).
+- **One row per object**, keyed by `(board_id, id)` with a `canvas_id` column
+  (issue #26), upserted per mutation — matches the per-object `addItem`/`alterItem`
+  write pattern (no whole-board rewrites). Reads are filtered by
+  `(board_id, canvas_id)`. Schema changes go through the ordered migration runner
+  (`storage/migrations.ts`); migration v3 added the `canvases` table + `canvas_id`
+  and back-filled every existing board with one `'default'` canvas.
+- **Canvases** live in their own table keyed by `(board_id, id)`, ordered by
+  `position` (creation order). `ensureDefaultCanvas` guarantees ≥1 canvas per
+  board; `createBoard` seeds one. `'default'` is only the back-fill id — "the
+  first canvas" is decided by ordering, not that magic id.
+- Deleting a board cascades its canvas + object rows (FK `ON DELETE CASCADE`, with
+  `PRAGMA foreign_keys = ON`). Objects have **no** FK to `canvases` (SQLite can't
+  add one via `ALTER`), so `deleteCanvas` removes a canvas's objects explicitly.
 
 ## Image blobs are separate from SQLite
 

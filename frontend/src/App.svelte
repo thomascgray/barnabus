@@ -22,6 +22,7 @@
   import PresenceStrip from "./components/presence-strip.svelte";
   import ImageUploadModal from "./components/image-upload-modal.svelte";
   import BoardToolsBar from "./components/board-tools-bar.svelte";
+  import CanvasBar from "./components/canvas-bar.svelte";
   import Minimap from "./components/minimap.svelte";
 
   // import testDataSet from "../test_data_sets/1.txt";
@@ -155,6 +156,7 @@
 
 <Toolbar />
 <BoardToolsBar />
+<CanvasBar />
 <Minimap />
 <LeftToolbar />
 

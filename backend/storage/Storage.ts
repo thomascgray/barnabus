@@ -26,6 +26,18 @@ export interface BoardMeta {
   hasPassphrase: boolean;
 }
 
+// A canvas within a board/room (issue #26). Objects are scoped to a canvas, not
+// just a board. `position` gives a stable display order (creation order); the
+// first canvas by position is the board's default and can't be deleted.
+export interface CanvasMeta {
+  id: string;
+  boardId: string;
+  name: string;
+  position: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Storage {
   /** Make sure a board row exists (no-op if it already does). Stays open (no
    *  passphrase) — used for the implicit default board. */
@@ -33,7 +45,7 @@ export interface Storage {
 
   // --- boards (Phase 2) -----------------------------------------------------
   /** Create a new board with a generated id and (optionally) a passphrase and
-   *  the name of the admin who created it. */
+   *  the name of the admin who created it. Also seeds its first canvas. */
   createBoard(input: { name: string; passphrase: string; createdBy?: string }): BoardMeta;
   /** All boards, newest first. Never includes passphrase hashes. */
   listBoards(): BoardMeta[];
@@ -42,14 +54,31 @@ export interface Storage {
   /** True if the board exists and the passphrase matches (open boards — those
    *  with no passphrase — accept any/empty passphrase). */
   verifyPassphrase(boardId: string, passphrase: string): boolean;
-  /** Delete a board and (via FK cascade) all its objects. */
+  /** Delete a board and (via FK cascade) all its canvases + objects. */
   deleteBoard(boardId: string): void;
 
-  // --- canvas objects (scoped to a board) -----------------------------------
-  /** All objects on a board. */
-  getObjects(boardId: string): Types.Object[];
-  /** Insert or replace a single object. */
-  upsertObject(boardId: string, object: Types.Object): void;
-  /** Remove a single object (used by the Phase 1 removeItem packet). */
-  deleteObject(boardId: string, objectId: string): void;
+  // --- canvases (scoped to a board) — issue #26 -----------------------------
+  /** Guarantee a board has at least one canvas, returning the first one. Used at
+   *  join so legacy/older boards without a canvas row still work. */
+  ensureDefaultCanvas(boardId: string, name?: string): CanvasMeta;
+  /** All canvases on a board, in display order (position asc). */
+  listCanvases(boardId: string): CanvasMeta[];
+  /** A single canvas, or null if it doesn't exist. */
+  getCanvas(boardId: string, canvasId: string): CanvasMeta | null;
+  /** Create a canvas. The caller supplies the id (minted client-side, like
+   *  object ids) so it can switch to it immediately. */
+  createCanvas(boardId: string, input: { id: string; name: string }): CanvasMeta;
+  /** Rename a canvas; returns the updated meta or null if it doesn't exist. */
+  renameCanvas(boardId: string, canvasId: string, name: string): CanvasMeta | null;
+  /** Delete a canvas and all of its objects. Callers must not pass the board's
+   *  first/only canvas (the server guards this). */
+  deleteCanvas(boardId: string, canvasId: string): void;
+
+  // --- canvas objects (scoped to a board + canvas) --------------------------
+  /** All objects on a canvas. */
+  getObjects(boardId: string, canvasId: string): Types.Object[];
+  /** Insert or replace a single object on a canvas. */
+  upsertObject(boardId: string, canvasId: string, object: Types.Object): void;
+  /** Remove a single object from a canvas. */
+  deleteObject(boardId: string, canvasId: string, objectId: string): void;
 }

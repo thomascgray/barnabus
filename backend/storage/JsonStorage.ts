@@ -5,7 +5,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type * as Types from "../../types";
-import { DEFAULT_BOARD_ID, type BoardMeta, type Storage } from "./Storage";
+import { DEFAULT_BOARD_ID, type BoardMeta, type CanvasMeta, type Storage } from "./Storage";
 
 export class JsonStorage implements Storage {
   private board: { [id: string]: Types.Object } = {};
@@ -73,16 +73,53 @@ export class JsonStorage implements Storage {
     this.persist();
   }
 
+  // JsonStorage is legacy single-board *and* single-canvas: it exposes exactly
+  // one canvas so the multi-canvas relay logic has something to bind to. The
+  // canvasId argument to the object methods is ignored (all objects live in the
+  // one flat map). Real multi-canvas support is SqliteStorage only.
+  private readonly canvas: CanvasMeta = {
+    id: "default",
+    boardId: DEFAULT_BOARD_ID,
+    name: "Board 1",
+    position: 0,
+    createdAt: 0,
+    updatedAt: 0,
+  };
+
+  ensureDefaultCanvas(): CanvasMeta {
+    return this.canvas;
+  }
+
+  listCanvases(): CanvasMeta[] {
+    return [this.canvas];
+  }
+
+  getCanvas(): CanvasMeta {
+    return this.canvas;
+  }
+
+  createCanvas(): CanvasMeta {
+    throw new Error("JsonStorage is single-canvas; createCanvas requires SqliteStorage");
+  }
+
+  renameCanvas(): CanvasMeta {
+    throw new Error("JsonStorage is single-canvas; renameCanvas requires SqliteStorage");
+  }
+
+  deleteCanvas(): void {
+    throw new Error("JsonStorage is single-canvas; deleteCanvas requires SqliteStorage");
+  }
+
   getObjects(): Types.Object[] {
     return Object.values(this.board);
   }
 
-  upsertObject(_boardId: string, object: Types.Object): void {
+  upsertObject(_boardId: string, _canvasId: string, object: Types.Object): void {
     this.board[object.id] = object;
     this.persist();
   }
 
-  deleteObject(_boardId: string, objectId: string): void {
+  deleteObject(_boardId: string, _canvasId: string, objectId: string): void {
     delete this.board[objectId];
     this.persist();
   }

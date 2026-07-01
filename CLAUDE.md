@@ -62,7 +62,7 @@ There is no test runner, linter config, or formatter wired up. "Passing CI" mean
 ## Architecture
 
 ### The wire protocol (`/types.ts`)
-Everything that crosses the network is a `Packet` — a discriminated union on `type` (`join`, `joinResponse`, `joinError`, `diceRoll`, `ping`, `pong`, `close`, `alterItem`, `addItem`, `removeItem`, `memberJoined`, `memberLeft`). Every outbound packet carries an `identity` (`{ id, name? }`). The board itself is a map of `Object`s, where `Object = Object_Image | Object_Text | Object_SVG` (also a discriminated union on `type`). When changing what gets synced, edit `types.ts` first and let both ends follow.
+Everything that crosses the network is a `Packet` — a discriminated union on `type` (`join`, `joinResponse`, `joinError`, `diceRoll`, `ping`, `pong`, `close`, `alterItem`, `addItem`, `removeItem`, `memberJoined`, `memberLeft`, and the canvas-management packets `switchCanvas`/`createCanvas`/`renameCanvas`/`deleteCanvas`/`canvasState`/`canvasList`). Every outbound packet carries an `identity` (`{ id, name? }`). The board itself is a map of `Object`s, where `Object = Object_Image | Object_Text | Object_SVG` (also a discriminated union on `type`). A board/room holds **many canvases** (issue #26); each `Object` belongs to one canvas and object packets are scoped to the sender's active canvas (see `CLAUDE/backend.md` / `CLAUDE/frontend.md`). When changing what gets synced, edit `types.ts` first and let both ends follow.
 
 `PacketWithoutIdentity` is a mapped type used so the client can call `sendMessage({ type: ... })` without manually attaching identity — `ConnectionManager` injects it.
 

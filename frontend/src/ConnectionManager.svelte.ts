@@ -10,6 +10,7 @@ import {
   updateObject,
 } from "./global.svelte";
 import { remember } from "./membership.svelte";
+import { applyCanvasState } from "./canvases.svelte";
 import { toast } from "./toast.svelte";
 import * as Types from "../../types";
 
@@ -25,12 +26,19 @@ export const cmState = $state<{
   boardName: string | null;
   // Kept so image uploads can re-auth with the same passphrase used to join.
   passphrase: string;
+  // The canvases in this board and which one this tab is viewing (issue #26).
+  // Seeded from joinResponse, kept in sync by canvasList/canvasState. Reactive
+  // UI chrome (drives the boards bar) — not the canvas hot loop.
+  canvases: Types.Canvas[];
+  activeCanvasId: string | null;
 }>({
   socket: null,
   connectionState: "idle",
   boardId: null,
   boardName: null,
   passphrase: "",
+  canvases: [],
+  activeCanvasId: null,
 });
 
 // What we tried to join, stashed so we can persist the membership once the
@@ -147,6 +155,16 @@ const openSocket = async (wsUrl: string) => {
       case "memberLeft":
         presence.members = presence.members.filter((m) => m.id !== data.payload.id);
         break;
+      case "canvasList":
+        // Authoritative canvas list for the room — replace ours so create/rename/
+        // delete from any client reconciles our optimistic edits (issue #26).
+        cmState.canvases = data.payload.canvases;
+        break;
+      case "canvasState":
+        // We were (re)bound to a canvas — swap its objects in. Imported here
+        // rather than in canvases.svelte.ts to keep the receive path in one place.
+        applyCanvasState(data.payload);
+        break;
       case "ping":
         onPing();
         break;
@@ -156,6 +174,10 @@ const openSocket = async (wsUrl: string) => {
 
 const onJoinResponse = (data: Types.JoinResponsePacket) => {
   presence.members = data.payload.members ?? [];
+  // Seed the canvas list + active canvas before importing (issue #26). The
+  // objects in boardInformation belong to the active canvas.
+  cmState.canvases = data.payload.canvases ?? [];
+  cmState.activeCanvasId = data.payload.activeCanvasId ?? null;
   importObjects(JSON.stringify(Object.values(data.payload.boardInformation)));
   toast(`Joined ${cmState.boardName ?? "board"}`, "success");
   // The server confirmed the join — only now is it safe to remember this board
@@ -177,6 +199,8 @@ const onJoinError = (data: Types.Packet_JoinError) => {
   cmState.connectionState = "idle";
   cmState.boardId = null;
   cmState.boardName = null;
+  cmState.canvases = [];
+  cmState.activeCanvasId = null;
 };
 
 const onPing = () => {
@@ -198,6 +222,8 @@ export let leaveBoard = () => {
   presence.members = [];
   cmState.boardId = null;
   cmState.boardName = null;
+  cmState.canvases = [];
+  cmState.activeCanvasId = null;
 };
 
 export const sendMessage = (packet: Types.PacketWithoutIdentity) => {

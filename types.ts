@@ -23,13 +23,28 @@ export type Member = {
   name: string;
 };
 
+// A canvas within a board/room (issue #26). A board holds many canvases, each
+// with its own objects; the client switches between them in the boards bar. Only
+// the id + display name travel on the wire — ordering is decided server-side and
+// canvases arrive already sorted. Structured as its own type so it can grow more
+// fields (colour, icon, per-canvas metadata) without touching call sites.
+export type Canvas = {
+  id: string;
+  name: string;
+};
+
 export type JoinResponsePacket = {
   type: "joinResponse";
   identity: Packet_Identity;
   payload: {
+    // Objects of the *active* canvas only (the one activeCanvasId points at).
     boardInformation: Record<string, Object>;
     // Everyone currently on the board (presence snapshot for the joiner).
     members: Member[];
+    // Every canvas in this board/room, in display order, and which one the
+    // server put this socket on (its objects are `boardInformation`).
+    canvases: Canvas[];
+    activeCanvasId: string;
   };
 };
 
@@ -166,6 +181,71 @@ export type Object_SVG = {
 
 export type Object = Object_Image | Object_Text | Object_SVG;
 
+// --- multi-canvas packets (issue #26) --------------------------------------
+// A board/room holds many canvases. One socket views one canvas at a time
+// (`socketCanvas` on the server), so object mutations are scoped to the sender's
+// active canvas. These packets manage the canvas list and which canvas a socket
+// is looking at; the passphrase/room membership stay at the board level, so
+// switching canvas needs no re-auth.
+
+// client → server: view a different canvas in the current board. The server
+// rebinds this socket and replies with a `canvasState` carrying that canvas's
+// objects.
+export type Packet_SwitchCanvas = {
+  type: "switchCanvas";
+  identity: Packet_Identity;
+  canvasId: string;
+};
+
+// client → server: create a new canvas in the current board. The client mints
+// the id (like it mints object ids) so it knows what to switch to immediately;
+// the server also moves the creator onto it.
+export type Packet_CreateCanvas = {
+  type: "createCanvas";
+  identity: Packet_Identity;
+  canvasId: string;
+  name: string;
+};
+
+// client → server: rename a canvas.
+export type Packet_RenameCanvas = {
+  type: "renameCanvas";
+  identity: Packet_Identity;
+  canvasId: string;
+  name: string;
+};
+
+// client → server: delete a canvas (the server refuses to delete the first /
+// only canvas). Anyone currently viewing it is moved to the first canvas.
+export type Packet_DeleteCanvas = {
+  type: "deleteCanvas";
+  identity: Packet_Identity;
+  canvasId: string;
+};
+
+// server → client: the objects of the canvas this socket is now viewing. Sent in
+// response to switch/create and to force-move a viewer off a deleted canvas. The
+// client clears the current objects and imports these.
+export type Packet_CanvasState = {
+  type: "canvasState";
+  identity: Packet_Identity;
+  payload: {
+    canvasId: string;
+    boardInformation: Record<string, Object>;
+  };
+};
+
+// server → client: broadcast to the whole room whenever the canvas list changes
+// (create/rename/delete) so every client's boards bar stays in sync. Does not
+// change which canvas a recipient is viewing (that's driven by canvasState).
+export type Packet_CanvasList = {
+  type: "canvasList";
+  identity: Packet_Identity;
+  payload: {
+    canvases: Canvas[];
+  };
+};
+
 export type Packet =
   | Packet_Join
   | JoinResponsePacket
@@ -179,7 +259,13 @@ export type Packet =
   | Packet_RemoveItem
   | Packet_ImagePreview
   | Packet_MemberJoined
-  | Packet_MemberLeft;
+  | Packet_MemberLeft
+  | Packet_SwitchCanvas
+  | Packet_CreateCanvas
+  | Packet_RenameCanvas
+  | Packet_DeleteCanvas
+  | Packet_CanvasState
+  | Packet_CanvasList;
 
 export type PacketWithoutIdentity = {
   [P in Packet["type"]]: Extract<Packet, { type: P }> extends infer T
