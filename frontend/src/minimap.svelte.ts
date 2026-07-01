@@ -27,11 +27,22 @@ const PADDING = 6;
 // keeps it from thrashing during a drag.
 const TICK_MS = 100;
 
+// Collapsed state persists per-browser (issue #35) so the minimap stays out of
+// the way across reloads, same pattern as barnabus.username / adminName.
+const COLLAPSED_KEY = "barnabus.minimapCollapsed";
+
 // Whether there's at least one object to show. The component hides the panel
-// when false (issue edge case: hide the minimap on an empty board).
+// when false (issue edge case: hide the minimap on an empty board). `collapsed`
+// (issue #35) shrinks the panel to a floating reopen button instead.
 export const minimapState = $state({
   hasObjects: false,
+  collapsed: localStorage.getItem(COLLAPSED_KEY) === "true",
 });
+
+export const setMinimapCollapsed = (collapsed: boolean) => {
+  minimapState.collapsed = collapsed;
+  localStorage.setItem(COLLAPSED_KEY, String(collapsed));
+};
 
 let canvas: HTMLCanvasElement | null = null;
 let ctx: CanvasRenderingContext2D | null = null;
