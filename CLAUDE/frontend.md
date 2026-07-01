@@ -124,6 +124,25 @@ desyncs that object across clients.
 - Presence (`presence.members`) is seeded from `joinResponse` and kept current by
   `memberJoined`/`memberLeft`.
 
+## Canvases (multiple boards per room — issue #26)
+
+A joined board/room holds **many canvases**; the boards bar (`canvas-bar.svelte`,
+top-left) switches between them, creates, renames, and deletes them. No re-auth
+on switch — the room passphrase covers every canvas.
+
+- **State:** `cmState.canvases` (the list) + `cmState.activeCanvasId` live on
+  `ConnectionManager` — reactive UI chrome that drives the bar, **not** the canvas
+  hot loop. Objects stay DOM-as-state: switching a canvas **clears the DOM objects
+  and imports the new set** (`applyCanvasState`), there is no reactive object store.
+- **Actions** live in `canvases.svelte.ts` (`switchCanvas`/`createCanvas`/
+  `renameCanvas`/`deleteCanvas`), kept out of `ConnectionManager` so they can call
+  `deselectObjects` (interactions) without a load-time import cycle — CM imports
+  only `applyCanvasState` back. New canvas ids are minted client-side (like object
+  ids). Actions are optimistic; the server's `canvasList`/`canvasState` reconcile.
+- **Receive side (CM inbound):** `canvasList` → replace `cmState.canvases`;
+  `canvasState` → `applyCanvasState` (deselect + clear + import, set active).
+- The **first** canvas can't be deleted (bar hides its ×; server enforces too).
+
 ## Clipboard & images
 
 - **Copy/paste** uses the real `copy`/`paste` events. `onCopy` serializes the

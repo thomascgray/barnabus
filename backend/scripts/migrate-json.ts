@@ -20,6 +20,8 @@ const board = JSON.parse(fs.readFileSync(jsonPath).toString()) as {
 
 const store = new SqliteStorage(config.dbPath);
 store.ensureBoard(DEFAULT_BOARD_ID, "Default Board");
+// Legacy JSON is single-canvas — import everything into the board's first canvas.
+const canvas = store.ensureDefaultCanvas(DEFAULT_BOARD_ID);
 
 const objects = Object.values(board);
 let migrated = 0;
@@ -31,7 +33,7 @@ for (const object of objects) {
     skipped++;
     continue;
   }
-  store.upsertObject(DEFAULT_BOARD_ID, object);
+  store.upsertObject(DEFAULT_BOARD_ID, canvas.id, object);
   migrated++;
 }
 

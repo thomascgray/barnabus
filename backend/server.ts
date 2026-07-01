@@ -22,7 +22,10 @@ const storage: Storage = new SqliteStorage(config.dbPath);
 // not a "default" the admin is forced to keep. It's open (no passphrase) and
 // seeded with a little welcome content the first time it's created.
 storage.ensureBoard(DEFAULT_BOARD_ID, "Example Board");
-seedExampleBoard();
+// Every board holds ≥1 canvas (issue #26); the example board's welcome content
+// lives on its first canvas.
+const exampleCanvas = storage.ensureDefaultCanvas(DEFAULT_BOARD_ID);
+seedExampleBoard(exampleCanvas.id);
 
 // Uploaded image bytes live on the filesystem, not in SQLite.
 const blobStore: BlobStore = new FsBlobStore(config.uploadsDir);
@@ -31,8 +34,8 @@ const blobStore: BlobStore = new FsBlobStore(config.uploadsDir);
 // (when it has no objects yet). This makes a fresh install land on something
 // that demonstrates the app instead of a blank canvas. If an admin clears it,
 // we don't keep re-adding the notes.
-function seedExampleBoard(): void {
-  if (storage.getObjects(DEFAULT_BOARD_ID).length > 0) return;
+function seedExampleBoard(canvasId: string): void {
+  if (storage.getObjects(DEFAULT_BOARD_ID, canvasId).length > 0) return;
 
   const note = (
     id: string,
@@ -90,7 +93,7 @@ function seedExampleBoard(): void {
     ),
   ];
 
-  for (const n of notes) storage.upsertObject(DEFAULT_BOARD_ID, n);
+  for (const n of notes) storage.upsertObject(DEFAULT_BOARD_ID, canvasId, n);
   console.log(`seeded example board with ${notes.length} welcome notes`);
 }
 
@@ -214,14 +217,20 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 
 const sockets: { [id: string]: WebSocket } = {};
 // Which board each connected client is bound to (set at join). One socket = one
-// board, so broadcasts and persistence are scoped by this map.
+// board, so presence and the canvas list are scoped by this map.
 const socketBoard: { [id: string]: string } = {};
+// Which canvas within its board each client is currently viewing (issue #26).
+// Set at join and changed by switch/create/delete. Object mutations and the
+// blurry image preview are scoped by this map (siblings on the *same canvas*),
+// so a change on one canvas never leaks onto another.
+const socketCanvas: { [id: string]: string } = {};
 // Per-connection presence info (the username supplied at join). Ephemeral —
 // presence lives only here, never in SQLite.
 const socketMember: { [id: string]: Types.Member } = {};
 const pendingPings: { [id: string]: ReturnType<typeof setTimeout> } = {};
 
-// All members currently on a board (presence snapshot).
+// All members currently on a board (presence snapshot). Presence is board/room
+// wide — it spans every canvas, so switching canvas doesn't change who's "here".
 const getMembersInRoom = (boardId: string): Types.Member[] =>
   Object.keys(socketBoard)
     .filter((i) => socketBoard[i] === boardId && socketMember[i])
@@ -248,17 +257,33 @@ const onJoin = (webSocket: WebSocket, data: Types.Packet_Join) => {
   sockets[data.identity.id] = webSocket;
   socketBoard[data.identity.id] = boardId;
   socketMember[data.identity.id] = member;
-  console.log("client joined:", data.identity.id, "board:", boardId, "as:", member.name);
 
-  // Reconstruct the legacy { [id]: Object } shape the client expects.
-  const objects = storage.getObjects(boardId);
+  // Bind the socket to the board's first canvas (issue #26). ensureDefaultCanvas
+  // covers older boards created before canvases existed.
+  storage.ensureDefaultCanvas(boardId);
+  const canvases = storage.listCanvases(boardId);
+  const activeCanvasId = canvases[0].id;
+  socketCanvas[data.identity.id] = activeCanvasId;
+  console.log(
+    "client joined:", data.identity.id, "board:", boardId,
+    "canvas:", activeCanvasId, "as:", member.name
+  );
+
+  // Reconstruct the legacy { [id]: Object } shape the client expects — the
+  // active canvas's objects only.
+  const objects = storage.getObjects(boardId, activeCanvasId);
   const boardInformation = Object.fromEntries(objects.map((o) => [o.id, o]));
 
   webSocket.send(
     JSON.stringify({
       type: "joinResponse",
       identity: data.identity,
-      payload: { boardInformation, members: getMembersInRoom(boardId) },
+      payload: {
+        boardInformation,
+        members: getMembersInRoom(boardId),
+        canvases: canvases.map((c) => ({ id: c.id, name: c.name })),
+        activeCanvasId,
+      },
     } satisfies Types.JoinResponsePacket)
   );
 
@@ -282,16 +307,58 @@ const sendJoinError = (
 };
 
 // Other sockets in a board (optionally excluding one id). The single primitive
-// behind every room-scoped broadcast.
+// behind every room-scoped broadcast (presence, dice, canvas-list).
 const socketsInRoom = (boardId: string, exceptId?: string): WebSocket[] =>
   Object.keys(sockets)
     .filter((i) => socketBoard[i] === boardId && i !== exceptId)
     .map((i) => sockets[i]);
 
-// Siblings = other clients bound to the same board as `id`. This is what scopes
-// every broadcast (addItem/alterItem/removeItem/diceRoll) to a single room.
+// Room-wide siblings = other clients on the same board as `id`, across all
+// canvases. Scopes broadcasts that are board-wide (diceRoll, presence).
 const getSiblingSockets = (id: string): WebSocket[] =>
   socketsInRoom(socketBoard[id], id);
+
+// Other sockets in a board that are viewing a specific canvas (issue #26).
+// Scopes object mutations + image previews so they land only on clients looking
+// at the same canvas as the sender.
+const socketsInCanvas = (boardId: string, canvasId: string, exceptId?: string): WebSocket[] =>
+  Object.keys(sockets)
+    .filter((i) => socketBoard[i] === boardId && socketCanvas[i] === canvasId && i !== exceptId)
+    .map((i) => sockets[i]);
+
+// Canvas-scoped siblings for `id` (same board AND same canvas, excluding self).
+const getCanvasSiblingSockets = (id: string): WebSocket[] =>
+  socketsInCanvas(socketBoard[id], socketCanvas[id], id);
+
+const broadcastToCanvasSiblings = (senderId: string, data: Types.Packet) => {
+  getCanvasSiblingSockets(senderId).forEach((s) => s.send(JSON.stringify(data)));
+};
+
+// Send the current canvas list to everyone on a board (issue #26). Called after
+// any create/rename/delete so every client's boards bar stays in sync.
+const sendCanvasList = (boardId: string) => {
+  const canvases = storage.listCanvases(boardId).map((c) => ({ id: c.id, name: c.name }));
+  const packet: Types.Packet_CanvasList = {
+    type: "canvasList",
+    identity: { id: "server" },
+    payload: { canvases },
+  };
+  socketsInRoom(boardId).forEach((s) => s.send(JSON.stringify(packet)));
+};
+
+// Send a socket the objects of the canvas it should now be viewing (issue #26).
+const sendCanvasState = (socketId: string, boardId: string, canvasId: string) => {
+  const socket = sockets[socketId];
+  if (!socket) return;
+  const objects = storage.getObjects(boardId, canvasId);
+  const boardInformation = Object.fromEntries(objects.map((o) => [o.id, o]));
+  const packet: Types.Packet_CanvasState = {
+    type: "canvasState",
+    identity: { id: "server" },
+    payload: { canvasId, boardInformation },
+  };
+  socket.send(JSON.stringify(packet));
+};
 
 const onPing = (webSocket: WebSocket, data: Types.Packet_Ping) => {
   // Client sent a ping, echo it back.
@@ -342,6 +409,7 @@ const removeClient = (clientId: string) => {
     }
     delete sockets[clientId];
     delete socketBoard[clientId];
+    delete socketCanvas[clientId];
     delete socketMember[clientId];
     console.log("client removed:", clientId);
 
@@ -361,19 +429,84 @@ const broadcastToSiblings = (senderId: string, data: Types.Packet) => {
   getSiblingSockets(senderId).forEach((sibling) => sibling.send(JSON.stringify(data)));
 };
 
+// Object mutations are scoped to the sender's active canvas: broadcast only to
+// siblings viewing the same canvas, and persist under that (board, canvas).
 const handleAlterItem = (_webSocket: WebSocket, data: Types.Packet_AlterItem) => {
-  broadcastToSiblings(data.identity.id, data);
-  storage.upsertObject(socketBoard[data.identity.id], data.payload.object);
+  const id = data.identity.id;
+  broadcastToCanvasSiblings(id, data);
+  storage.upsertObject(socketBoard[id], socketCanvas[id], data.payload.object);
 };
 
 const handleAddItem = (_webSocket: WebSocket, data: Types.Packet_AddItem) => {
-  broadcastToSiblings(data.identity.id, data);
-  storage.upsertObject(socketBoard[data.identity.id], data.payload.object);
+  const id = data.identity.id;
+  broadcastToCanvasSiblings(id, data);
+  storage.upsertObject(socketBoard[id], socketCanvas[id], data.payload.object);
 };
 
 const handleRemoveItem = (_webSocket: WebSocket, data: Types.Packet_RemoveItem) => {
-  broadcastToSiblings(data.identity.id, data);
-  storage.deleteObject(socketBoard[data.identity.id], data.payload.id);
+  const id = data.identity.id;
+  broadcastToCanvasSiblings(id, data);
+  storage.deleteObject(socketBoard[id], socketCanvas[id], data.payload.id);
+};
+
+// --- canvas operations (issue #26) -----------------------------------------
+
+const handleSwitchCanvas = (_webSocket: WebSocket, data: Types.Packet_SwitchCanvas) => {
+  const id = data.identity.id;
+  const boardId = socketBoard[id];
+  if (!boardId) return;
+  const canvas = storage.getCanvas(boardId, data.canvasId);
+  if (!canvas) return; // unknown canvas — ignore
+  socketCanvas[id] = canvas.id;
+  sendCanvasState(id, boardId, canvas.id);
+};
+
+const handleCreateCanvas = (_webSocket: WebSocket, data: Types.Packet_CreateCanvas) => {
+  const id = data.identity.id;
+  const boardId = socketBoard[id];
+  if (!boardId) return;
+  if (storage.getCanvas(boardId, data.canvasId)) return; // id collision — ignore
+  const name = (data.name ?? "").trim() || "Untitled board";
+  storage.createCanvas(boardId, { id: data.canvasId, name });
+  // Move the creator onto the new (empty) canvas and tell the whole room.
+  socketCanvas[id] = data.canvasId;
+  sendCanvasState(id, boardId, data.canvasId);
+  sendCanvasList(boardId);
+};
+
+const handleRenameCanvas = (_webSocket: WebSocket, data: Types.Packet_RenameCanvas) => {
+  const id = data.identity.id;
+  const boardId = socketBoard[id];
+  if (!boardId) return;
+  const name = (data.name ?? "").trim();
+  if (!name) return;
+  if (!storage.getCanvas(boardId, data.canvasId)) return;
+  storage.renameCanvas(boardId, data.canvasId, name);
+  sendCanvasList(boardId);
+};
+
+const handleDeleteCanvas = (_webSocket: WebSocket, data: Types.Packet_DeleteCanvas) => {
+  const id = data.identity.id;
+  const boardId = socketBoard[id];
+  if (!boardId) return;
+  const canvases = storage.listCanvases(boardId);
+  // Never delete the last remaining canvas or the board's first/default canvas.
+  if (canvases.length <= 1) return;
+  if (canvases[0].id === data.canvasId) return;
+  if (!canvases.some((c) => c.id === data.canvasId)) return;
+
+  storage.deleteCanvas(boardId, data.canvasId);
+  const fallback = storage.listCanvases(boardId)[0];
+
+  // Move anyone (including the deleter) who was viewing the now-gone canvas onto
+  // the fallback, sending them its objects.
+  Object.keys(socketCanvas).forEach((sid) => {
+    if (socketBoard[sid] === boardId && socketCanvas[sid] === data.canvasId) {
+      socketCanvas[sid] = fallback.id;
+      sendCanvasState(sid, boardId, fallback.id);
+    }
+  });
+  sendCanvasList(boardId);
 };
 
 // Periodically ping clients and drop ones that don't pong in time.
@@ -410,8 +543,9 @@ wss.on("connection", function connection(ws: WebSocket) {
         case "imagePreview":
           // Broadcast-only, like diceRoll: a transient blurry placeholder shown
           // while the uploader's image is in flight. Never persisted — the real
-          // image follows as an addItem.
-          broadcastToSiblings(json.identity.id, json);
+          // image follows as an addItem. Canvas-scoped (it's a placeholder on the
+          // canvas), unlike diceRoll which is board-wide.
+          broadcastToCanvasSiblings(json.identity.id, json);
           break;
         case "alterItem":
           handleAlterItem(ws, json);
@@ -421,6 +555,18 @@ wss.on("connection", function connection(ws: WebSocket) {
           break;
         case "removeItem":
           handleRemoveItem(ws, json);
+          break;
+        case "switchCanvas":
+          handleSwitchCanvas(ws, json);
+          break;
+        case "createCanvas":
+          handleCreateCanvas(ws, json);
+          break;
+        case "renameCanvas":
+          handleRenameCanvas(ws, json);
+          break;
+        case "deleteCanvas":
+          handleDeleteCanvas(ws, json);
           break;
         default:
           console.log("unknown packet type:", (json as any).type);

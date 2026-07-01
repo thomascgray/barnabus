@@ -41,6 +41,36 @@ const MIGRATIONS: { version: number; sql: string }[] = [
       WHERE id = 'default' AND name = 'Default Board';
     `,
   },
+  {
+    // Multiple canvases per board/room (issue #26). Each board now holds many
+    // canvases and every object belongs to one. We add a `canvases` table and a
+    // `canvas_id` column on objects, then back-fill: give every existing board a
+    // single default canvas (id 'default') and assign all its existing objects
+    // to it (the ADD COLUMN default). The 'default' id is only a back-fill /
+    // ensureDefaultCanvas convenience — "the first canvas" is decided by
+    // ordering (position, created_at), not by this magic id.
+    version: 3,
+    sql: `
+      CREATE TABLE IF NOT EXISTS canvases (
+        board_id   TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+        id         TEXT NOT NULL,
+        name       TEXT NOT NULL,
+        position   INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (board_id, id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_canvases_board ON canvases(board_id);
+
+      ALTER TABLE objects ADD COLUMN canvas_id TEXT NOT NULL DEFAULT 'default';
+
+      CREATE INDEX IF NOT EXISTS idx_objects_canvas ON objects(board_id, canvas_id);
+
+      INSERT INTO canvases (board_id, id, name, position, created_at, updated_at)
+        SELECT id, 'default', 'Board 1', 0, created_at, updated_at FROM boards;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

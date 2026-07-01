@@ -4,7 +4,7 @@ import { Database } from "bun:sqlite";
 import * as fs from "fs";
 import * as path from "path";
 import type * as Types from "../../types";
-import type { BoardMeta, Storage } from "./Storage";
+import type { BoardMeta, CanvasMeta, Storage } from "./Storage";
 import { runMigrations } from "./migrations";
 
 export class SqliteStorage implements Storage {
@@ -44,6 +44,8 @@ export class SqliteStorage implements Storage {
          VALUES (?, ?, ?, ?, ?, ?)`
       )
       .run(id, input.name, hash, createdBy, now, now);
+    // Every board starts with one (undeletable) canvas.
+    this.ensureDefaultCanvas(id);
     return { id, name: input.name, createdBy, createdAt: now, updatedAt: now, hasPassphrase: hash !== "" };
   }
 
@@ -99,30 +101,126 @@ export class SqliteStorage implements Storage {
     this.db.query(`DELETE FROM boards WHERE id = ?`).run(boardId);
   }
 
-  getObjects(boardId: string): Types.Object[] {
-    const rows = this.db
-      .query<{ data: string }, [string]>(`SELECT data FROM objects WHERE board_id = ?`)
-      .all(boardId);
-    return rows.map((row) => JSON.parse(row.data) as Types.Object);
+  // --- canvases (issue #26) -------------------------------------------------
+
+  private rowToCanvas(r: {
+    id: string;
+    board_id: string;
+    name: string;
+    position: number;
+    created_at: number;
+    updated_at: number;
+  }): CanvasMeta {
+    return {
+      id: r.id,
+      boardId: r.board_id,
+      name: r.name,
+      position: r.position,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
   }
 
-  upsertObject(boardId: string, object: Types.Object): void {
+  ensureDefaultCanvas(boardId: string, name = "Board 1"): CanvasMeta {
+    const existing = this.listCanvases(boardId);
+    if (existing.length > 0) return existing[0];
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO objects (board_id, id, type, data, updated_at)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO canvases (board_id, id, name, position, created_at, updated_at)
+         VALUES (?, 'default', ?, 0, ?, ?)
+         ON CONFLICT(board_id, id) DO NOTHING`
+      )
+      .run(boardId, name, now, now);
+    return this.getCanvas(boardId, "default")!;
+  }
+
+  listCanvases(boardId: string): CanvasMeta[] {
+    return this.db
+      .query<
+        { id: string; board_id: string; name: string; position: number; created_at: number; updated_at: number },
+        [string]
+      >(
+        `SELECT id, board_id, name, position, created_at, updated_at
+         FROM canvases WHERE board_id = ? ORDER BY position ASC, created_at ASC`
+      )
+      .all(boardId)
+      .map((r) => this.rowToCanvas(r));
+  }
+
+  getCanvas(boardId: string, canvasId: string): CanvasMeta | null {
+    const r = this.db
+      .query<
+        { id: string; board_id: string; name: string; position: number; created_at: number; updated_at: number },
+        [string, string]
+      >(
+        `SELECT id, board_id, name, position, created_at, updated_at
+         FROM canvases WHERE board_id = ? AND id = ?`
+      )
+      .get(boardId, canvasId);
+    return r ? this.rowToCanvas(r) : null;
+  }
+
+  createCanvas(boardId: string, input: { id: string; name: string }): CanvasMeta {
+    const now = Date.now();
+    // Append after the current last canvas so display order = creation order.
+    const posRow = this.db
+      .query<{ p: number | null }, [string]>(
+        `SELECT MAX(position) AS p FROM canvases WHERE board_id = ?`
+      )
+      .get(boardId);
+    const position = (posRow?.p ?? -1) + 1;
+    this.db
+      .query(
+        `INSERT INTO canvases (board_id, id, name, position, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(boardId, input.id, input.name, position, now, now);
+    return { id: input.id, boardId, name: input.name, position, createdAt: now, updatedAt: now };
+  }
+
+  renameCanvas(boardId: string, canvasId: string, name: string): CanvasMeta | null {
+    const now = Date.now();
+    this.db
+      .query(`UPDATE canvases SET name = ?, updated_at = ? WHERE board_id = ? AND id = ?`)
+      .run(name, now, boardId, canvasId);
+    return this.getCanvas(boardId, canvasId);
+  }
+
+  deleteCanvas(boardId: string, canvasId: string): void {
+    // No FK from objects → canvases (SQLite can't add one via ALTER), so remove
+    // the canvas's objects explicitly, then the canvas row.
+    this.db.query(`DELETE FROM objects WHERE board_id = ? AND canvas_id = ?`).run(boardId, canvasId);
+    this.db.query(`DELETE FROM canvases WHERE board_id = ? AND id = ?`).run(boardId, canvasId);
+  }
+
+  getObjects(boardId: string, canvasId: string): Types.Object[] {
+    const rows = this.db
+      .query<{ data: string }, [string, string]>(
+        `SELECT data FROM objects WHERE board_id = ? AND canvas_id = ?`
+      )
+      .all(boardId, canvasId);
+    return rows.map((row) => JSON.parse(row.data) as Types.Object);
+  }
+
+  upsertObject(boardId: string, canvasId: string, object: Types.Object): void {
+    const now = Date.now();
+    this.db
+      .query(
+        `INSERT INTO objects (board_id, canvas_id, id, type, data, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(board_id, id) DO UPDATE SET
+           canvas_id = excluded.canvas_id,
            type = excluded.type,
            data = excluded.data,
            updated_at = excluded.updated_at`
       )
-      .run(boardId, object.id, object.type, JSON.stringify(object), now);
+      .run(boardId, canvasId, object.id, object.type, JSON.stringify(object), now);
   }
 
-  deleteObject(boardId: string, objectId: string): void {
+  deleteObject(boardId: string, canvasId: string, objectId: string): void {
     this.db
-      .query(`DELETE FROM objects WHERE board_id = ? AND id = ?`)
-      .run(boardId, objectId);
+      .query(`DELETE FROM objects WHERE board_id = ? AND canvas_id = ? AND id = ?`)
+      .run(boardId, canvasId, objectId);
   }
 }
