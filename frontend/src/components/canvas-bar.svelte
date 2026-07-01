@@ -1,22 +1,29 @@
 <script lang="ts">
-  // The "boards" bar (issue #26): a floating bar at the top-left, to the left of
-  // the centred camera/zoom controls, for managing the canvases in this room.
-  // Select a canvas (click → switch to it), create a new one (+), rename any
-  // (double-click), and delete any but the first (× on hover).
+  // The canvas switcher (issue #26 + follow-up): a compact dropdown that sits in
+  // the centred top bar, immediately left of the camera controls. The trigger
+  // shows the active canvas name; the menu lists every canvas (click to switch),
+  // with per-row inline rename (pencil) + delete (trash), and a "New canvas" item.
+  //
+  // Built on shadcn-svelte's DropdownMenu (see CLAUDE/frontend-ui.md). Switch/new
+  // are real DropdownMenu.Items so they close the menu + keep keyboard nav; the
+  // rename/delete icons are *siblings* of the item (not children) so clicking them
+  // never triggers the row's switch, and — being inside the portalled content —
+  // they don't dismiss the menu, which lets the inline rename input stay open.
   import { cmState } from "../ConnectionManager.svelte";
   import * as Canvases from "../canvases.svelte";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
+  import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
+  import PencilIcon from "@lucide/svelte/icons/pencil";
+  import Trash2Icon from "@lucide/svelte/icons/trash-2";
+  import PlusIcon from "@lucide/svelte/icons/plus";
+  import CheckIcon from "@lucide/svelte/icons/check";
 
-  // Like the other bars: use mousedown and swallow the event so the canvas
-  // background listener underneath never starts a selection-box drag from a bar
-  // click.
-  const action = (fn: () => void) => (e: Event) => {
-    e.preventDefault();
-    e.stopPropagation();
-    fn();
-  };
+  const activeName = $derived(
+    cmState.canvases.find((c) => c.id === cmState.activeCanvasId)?.name ??
+      "Canvas"
+  );
 
-  // Inline rename state. `editingId` is the canvas being renamed; null when not
-  // editing.
+  // Inline rename state. `editingId` is the canvas being renamed; null when idle.
   let editingId = $state<string | null>(null);
   let editValue = $state("");
 
@@ -36,8 +43,8 @@
     editingId = null;
   };
 
-  // Stop canvas keyboard shortcuts (key_DOWN on window) from firing while typing
-  // a canvas name; handle our own Enter/Escape.
+  // Handle our own Enter/Escape and stop the event reaching the window-level
+  // canvas shortcuts (Listeners.key_DOWN) while typing a name.
   const onRenameKeydown = (e: KeyboardEvent) => {
     e.stopPropagation();
     if (e.key === "Enter") {
@@ -49,10 +56,27 @@
     }
   };
 
+  const onSwitch = (id: string) => {
+    editingId = null;
+    Canvases.switchCanvas(id);
+  };
+
+  const onNew = () => {
+    editingId = null;
+    Canvases.createCanvas();
+  };
+
   const onDelete = (id: string, name: string) => {
-    if (confirm(`Delete board "${name}"? This removes all of its objects.`)) {
+    if (confirm(`Delete canvas "${name}"? This removes all of its objects.`)) {
       Canvases.deleteCanvas(id);
     }
+  };
+
+  // A row-action button (pencil/trash) must not bubble into the switch item.
+  const rowAction = (fn: () => void) => (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+    fn();
   };
 
   const autofocus = (node: HTMLInputElement) => {
@@ -61,65 +85,91 @@
   };
 </script>
 
-<div
-  id="canvas-bar-wrapper"
-  class="absolute left-0 top-0 flex flex-row items-center pointer-events-none"
->
-  <div
-    class="p-2 mt-4 ml-4 rounded-full flex flex-row items-center space-x-2 bg-slate-600 pointer-events-none max-w-[60vw] overflow-x-auto"
+<DropdownMenu.Root>
+  <DropdownMenu.Trigger
+    title="Switch canvas"
+    class="h-12 max-w-64 flex items-center gap-2 rounded-full bg-slate-600 hover:bg-slate-500 px-4 text-slate-100 pointer-events-auto active:scale-95 transition-colors outline-hidden"
   >
+    <span class="truncate text-sm font-semibold">{activeName}</span>
+    <ChevronDownIcon class="size-4 shrink-0 opacity-80" />
+  </DropdownMenu.Trigger>
+
+  <DropdownMenu.Content
+    align="center"
+    sideOffset={8}
+    class="min-w-60 pointer-events-auto"
+  >
+    <DropdownMenu.Label class="text-muted-foreground text-xs font-normal">
+      Canvases
+    </DropdownMenu.Label>
+    <DropdownMenu.Separator />
+
     {#each cmState.canvases as canvas, i (canvas.id)}
       {#if editingId === canvas.id}
-        <div
-          class="px-2 py-1 rounded-full bg-slate-200 flex items-center pointer-events-auto"
-        >
+        <div class="px-1 py-0.5">
+          <!-- svelte-ignore a11y_autofocus -->
           <input
             use:autofocus
             bind:value={editValue}
             onkeydown={onRenameKeydown}
             onblur={commitRename}
-            class="w-28 bg-transparent text-sm font-semibold text-slate-800 outline-none"
+            class="w-full rounded-sm border border-input bg-background px-2 py-1 text-sm text-foreground outline-hidden focus:border-ring"
           />
         </div>
       {:else}
-        <div
-          class="group flex flex-row items-center rounded-full pointer-events-auto {canvas.id ===
-          cmState.activeCanvasId
-            ? 'bg-slate-200 text-slate-900'
-            : 'bg-slate-400 text-slate-800 hover:bg-slate-300'}"
-        >
-          <button
-            onmousedown={action(() => Canvases.switchCanvas(canvas.id))}
-            ondblclick={() => startRename(canvas.id, canvas.name)}
-            title={`Switch to "${canvas.name}" — double-click to rename`}
-            class="px-3 py-1 text-sm font-semibold max-w-[10rem] truncate active:scale-95"
+        <div class="group/row flex items-center">
+          <DropdownMenu.Item
+            onSelect={() => onSwitch(canvas.id)}
+            class="flex-1 min-w-0 cursor-pointer"
           >
-            {canvas.name}
-          </button>
-
-          <!-- delete: available on any board but the first/default one -->
-          {#if i > 0}
-            <button
-              onmousedown={action(() => onDelete(canvas.id, canvas.name))}
-              title={`Delete "${canvas.name}"`}
-              aria-label={`Delete board ${canvas.name}`}
-              class="mr-1 w-5 h-5 flex items-center justify-center rounded-full text-slate-500 hover:text-white hover:bg-red-500 leading-none"
+            <CheckIcon
+              class="size-4 shrink-0 {canvas.id === cmState.activeCanvasId
+                ? 'opacity-100'
+                : 'opacity-0'}"
+            />
+            <span
+              class="truncate {canvas.id === cmState.activeCanvasId
+                ? 'font-semibold'
+                : ''}"
             >
-              &times;
+              {canvas.name}
+            </span>
+          </DropdownMenu.Item>
+
+          <!-- Sibling actions: revealed on row hover / focus-within. -->
+          <div
+            class="flex items-center gap-0.5 pr-1 opacity-0 group-hover/row:opacity-100 focus-within:opacity-100"
+          >
+            <button
+              type="button"
+              onclick={rowAction(() => startRename(canvas.id, canvas.name))}
+              title="Rename"
+              aria-label={`Rename ${canvas.name}`}
+              class="flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <PencilIcon class="size-3.5" />
             </button>
-          {/if}
+            <!-- delete: any canvas but the first/default one -->
+            {#if i > 0}
+              <button
+                type="button"
+                onclick={rowAction(() => onDelete(canvas.id, canvas.name))}
+                title="Delete"
+                aria-label={`Delete ${canvas.name}`}
+                class="flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              >
+                <Trash2Icon class="size-3.5" />
+              </button>
+            {/if}
+          </div>
         </div>
       {/if}
     {/each}
 
-    <!-- create a new board -->
-    <button
-      onmousedown={action(() => Canvases.createCanvas())}
-      title="New board"
-      aria-label="New board"
-      class="w-8 h-8 flex items-center justify-center rounded-full bg-slate-400 hover:bg-slate-300 hover:scale-110 active:scale-95 pointer-events-auto text-slate-800 text-lg font-semibold leading-none"
-    >
-      +
-    </button>
-  </div>
-</div>
+    <DropdownMenu.Separator />
+    <DropdownMenu.Item onSelect={onNew} class="cursor-pointer">
+      <PlusIcon class="size-4 shrink-0" />
+      <span>New canvas</span>
+    </DropdownMenu.Item>
+  </DropdownMenu.Content>
+</DropdownMenu.Root>

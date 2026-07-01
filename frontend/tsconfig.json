@@ -15,7 +15,16 @@
     "checkJs": true,
     "isolatedModules": true,
     "moduleDetection": "force",
-    "moduleResolution": "node",
+    // "bundler" (not classic "node") so TS resolves package `exports` maps —
+    // required by bits-ui / @lucide/svelte subpath imports (e.g.
+    // "@lucide/svelte/icons/check") that the shadcn-svelte components use. It
+    // also resolves the `.js`-extension imports those components emit to their
+    // `.ts` sources. This is the recommended resolution for Vite projects.
+    "moduleResolution": "bundler",
+    "paths": {
+      "$lib": ["./src/lib"],
+      "$lib/*": ["./src/lib/*"]
+    },
   },
   "include": ["src/**/*.ts", "src/**/*.js", "src/**/*.svelte"]
 }

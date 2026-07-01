@@ -18,6 +18,8 @@ the invariants that break things if you don't know them:
 
 - frontend, canvas, objects, sync, syncing, copy/paste, drawing, images, board
   picker, presence UI → read `./CLAUDE/frontend.md`
+- UI components, shadcn-svelte, dropdowns/dialogs/buttons/menus, Tailwind, theming,
+  building new UI chrome → read `./CLAUDE/frontend-ui.md`
 - backend, server, relay, rooms, storage, SQLite, passphrase, admin, uploads,
   blobs, presence, wire protocol → read `./CLAUDE/backend.md`
 

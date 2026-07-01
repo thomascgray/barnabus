@@ -155,8 +155,17 @@
 <PresenceStrip />
 
 <Toolbar />
-<BoardToolsBar />
-<CanvasBar />
+
+<!-- Centred top bar: the canvas switcher sits immediately left of the camera /
+     zoom controls. The container is click-through (pointer-events-none); each bar
+     re-enables pointer events on its own interactive chrome. -->
+<div
+  class="absolute left-0 top-0 w-screen mt-4 flex flex-row justify-center items-center gap-2 pointer-events-none"
+>
+  <CanvasBar />
+  <BoardToolsBar />
+</div>
+
 <Minimap />
 <LeftToolbar />
 

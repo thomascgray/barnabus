@@ -216,6 +216,14 @@ export interface ICreateTextElementArgs {
   scale?: number;
   isBold?: boolean;
   isItalic?: boolean;
+  // When true, width/height/fontSize are already in world/canvas space (they
+  // came from exportObject on the import/duplicate/paste path) and must NOT be
+  // re-divided by the current camera zoom. When false (a freshly placed box),
+  // they are screen-pixel defaults and get converted to world space so the box
+  // is a constant on-screen size regardless of zoom. Re-dividing an already
+  // world-space size by cameraZ blew duplicates up by 1/cameraZ (huge when
+  // zoomed out — e.g. ~3.4x at 29% zoom).
+  dimensionsAreWorldSpace?: boolean;
 }
 
 export const createTextElement = (args: ICreateTextElementArgs) => {
@@ -233,10 +241,15 @@ export const createTextElement = (args: ICreateTextElementArgs) => {
     scale = 1,
     isBold = false,
     isItalic = false,
+    dimensionsAreWorldSpace = false,
   } = args;
 
   appState.zIndexCounter++;
   const cameraZ = Number(dom?.camera?.dataset?.z || 1);
+  // The divisor that converts the incoming width/height/fontSize into world
+  // space. For a freshly placed box that's the camera zoom (screen -> world);
+  // for an imported box the sizes are already world-space, so divide by 1.
+  const sizeDivisor = dimensionsAreWorldSpace ? 1 : cameraZ;
   const textAreaElement = document.createElement("textarea");
   // Preserve the id when re-importing from storage/sync (see SVG factory note).
   let id = args.id ?? nanoid(8);
@@ -292,8 +305,8 @@ export const createTextElement = (args: ICreateTextElementArgs) => {
   const realWidth = width / scale;
   textAreaElement.style.width = `${realWidth}px`;
 
-  textAreaElement.dataset.fontSize = (fontSize / cameraZ).toString();
-  textAreaElement.style.fontSize = `${fontSize / cameraZ}px`;
+  textAreaElement.dataset.fontSize = (fontSize / sizeDivisor).toString();
+  textAreaElement.style.fontSize = `${fontSize / sizeDivisor}px`;
 
   textAreaElement.style.resize = "none";
   textAreaElement.style.overflowY = "hidden";
@@ -310,11 +323,11 @@ export const createTextElement = (args: ICreateTextElementArgs) => {
   };
   setTimeout(() => {
     const realWidth = width / scale;
-    textAreaElement.style.width = `${realWidth / cameraZ}px`;
-    textAreaElement.dataset.width = (width / cameraZ).toString();
-    textAreaElement.dataset.widthB = (width / cameraZ).toString();
+    textAreaElement.style.width = `${realWidth / sizeDivisor}px`;
+    textAreaElement.dataset.width = (width / sizeDivisor).toString();
+    textAreaElement.dataset.widthB = (width / sizeDivisor).toString();
 
-    const realHeight = height / scale / cameraZ;
+    const realHeight = height / scale / sizeDivisor;
 
     textAreaElement.style.height = realHeight + "px";
     // Store the camera-adjusted (world-space) height, exactly as width above is
@@ -323,8 +336,8 @@ export const createTextElement = (args: ICreateTextElementArgs) => {
     // rendered height by a factor of cameraZ. The selection wrapper sizes itself
     // from data-height, so it came out the wrong height — short and detached
     // from the textarea (issue #32).
-    textAreaElement.dataset.height = (height / cameraZ).toString();
-    textAreaElement.dataset.heightB = (height / cameraZ).toString();
+    textAreaElement.dataset.height = (height / sizeDivisor).toString();
+    textAreaElement.dataset.heightB = (height / sizeDivisor).toString();
 
     if (focusOnCreation) {
       // A freshly-placed text box should be ready to type into immediately:

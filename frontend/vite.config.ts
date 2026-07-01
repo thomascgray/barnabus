@@ -1,9 +1,19 @@
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import tailwindcss from "@tailwindcss/vite";
+import path from "path";
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [svelte()],
+  // Tailwind v4 runs as a Vite plugin (no PostCSS config). `$lib` aliases the
+  // shadcn-svelte component tree in src/lib (mirrors the SvelteKit convention so
+  // shadcn's generated imports resolve in this plain-Vite app).
+  plugins: [tailwindcss(), svelte()],
+  resolve: {
+    alias: {
+      $lib: path.resolve("./src/lib"),
+    },
+  },
   server: {
     host: "localhost",
     port: 3000,

@@ -63,13 +63,12 @@
   };
 </script>
 
+<!-- Positioned by the shared centred top-bar container in App.svelte, next to the
+     canvas switcher — so this is just the pill itself now. -->
 <div
   id="board-tools-wrapper"
-  class="absolute left-0 top-0 w-screen flex flex-row justify-center items-center pointer-events-none"
+  class="p-2 rounded-full flex flex-row items-center space-x-2 bg-slate-600 pointer-events-none"
 >
-  <div
-    class="p-2 mt-4 rounded-full flex flex-row items-center space-x-2 bg-slate-600 pointer-events-none"
-  >
     <!-- zoom step out (-) -->
     <button
       onmousedown={action(BoardTools.zoomOut)}
@@ -182,5 +181,4 @@
         <circle cx="8" cy="8" r="1.2" fill="currentColor" stroke="none" />
       </svg>
     </button>
-  </div>
 </div>

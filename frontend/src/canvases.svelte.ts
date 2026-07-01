@@ -16,7 +16,28 @@ import { nanoid } from "nanoid";
 import { clearObjects, importObjects } from "./global.svelte";
 import { cmState, sendMessage } from "./ConnectionManager.svelte";
 import { deselectObjects } from "./interactions.svelte";
+import { readCamera, setCamera } from "./board_tools.svelte";
 import type * as Types from "../../types";
+
+// Per-canvas camera memory (this tab only). The camera (pan + zoom) lives on the
+// DOM and is never synced — matching that, this map is in-memory and ephemeral:
+// switching a canvas saves the view you're leaving and restores the one you're
+// entering, so each canvas keeps its own vantage point. A canvas we've never
+// framed has no entry, and we leave the camera untouched (no jarring jump).
+const cameraByCanvas = new Map<string, { x: number; y: number; z: number }>();
+
+// Snapshot the current view under the canvas we're about to leave.
+const rememberCurrentCamera = () => {
+  if (cmState.activeCanvasId) {
+    cameraByCanvas.set(cmState.activeCanvasId, readCamera());
+  }
+};
+
+// Restore a canvas's remembered view (instant). No-op if we've never framed it.
+const restoreCameraFor = (canvasId: string) => {
+  const cam = cameraByCanvas.get(canvasId);
+  if (cam) setCamera(cam.x, cam.y, cam.z, false);
+};
 
 // Drop the current selection + wipe the DOM objects. Shared by every canvas
 // change so no stale selection chrome or object element survives the swap.
@@ -36,6 +57,9 @@ export const applyCanvasState = (payload: {
   teardownCurrentCanvas();
   cmState.activeCanvasId = payload.canvasId;
   importObjects(JSON.stringify(Object.values(payload.boardInformation)));
+  // Now that this canvas's objects are on screen, jump the camera to wherever we
+  // last were on it (if we've been here before this session).
+  restoreCameraFor(payload.canvasId);
 };
 
 // Switch to another canvas in this board. Optimistically clears the current view
@@ -44,6 +68,7 @@ export const applyCanvasState = (payload: {
 export const switchCanvas = (canvasId: string) => {
   if (!cmState.boardId) return;
   if (canvasId === cmState.activeCanvasId) return;
+  rememberCurrentCamera();
   teardownCurrentCanvas();
   cmState.activeCanvasId = canvasId;
   sendMessage({ type: "switchCanvas", canvasId });
@@ -57,14 +82,15 @@ export const createCanvas = (name?: string) => {
   if (!cmState.boardId) return;
   const canvasId = nanoid();
   const canvasName = (name ?? "").trim() || defaultCanvasName();
+  rememberCurrentCamera();
   cmState.canvases = [...cmState.canvases, { id: canvasId, name: canvasName }];
   teardownCurrentCanvas();
   cmState.activeCanvasId = canvasId;
   sendMessage({ type: "createCanvas", canvasId, name: canvasName });
 };
 
-// A sensible unique-ish default name for a freshly created canvas ("Board N").
-const defaultCanvasName = () => `Board ${cmState.canvases.length + 1}`;
+// A sensible unique-ish default name for a freshly created canvas ("Canvas N").
+const defaultCanvasName = () => `Canvas ${cmState.canvases.length + 1}`;
 
 // Rename a canvas. Optimistically updates the local list; the server confirms
 // with an authoritative canvasList.
@@ -83,6 +109,7 @@ export const renameCanvas = (canvasId: string, name: string) => {
 export const deleteCanvas = (canvasId: string) => {
   if (cmState.canvases.length <= 1) return;
   if (isFirstCanvas(canvasId)) return;
+  cameraByCanvas.delete(canvasId);
   cmState.canvases = cmState.canvases.filter((c) => c.id !== canvasId);
   sendMessage({ type: "deleteCanvas", canvasId });
 };

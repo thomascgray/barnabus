@@ -8,6 +8,10 @@ attributes), not entries in a reactive store. Logic lives in `*.svelte.ts`
 modules; `components/` is mostly presentational. (See `CLAUDE.md` for module
 layering.)
 
+**UI chrome uses shadcn-svelte on Tailwind v4** — see `./frontend-ui.md` before
+building buttons/dropdowns/dialogs/menus. Chrome uses the component library; the
+canvas hot loop (objects/camera) stays bare-metal DOM as described below.
+
 ## Performance is the point: the DOM *is* the state (not framework state)
 
 This is the foundational decision the whole frontend is built around, and it is
@@ -126,9 +130,25 @@ desyncs that object across clients.
 
 ## Canvases (multiple boards per room — issue #26)
 
-A joined board/room holds **many canvases**; the boards bar (`canvas-bar.svelte`,
-top-left) switches between them, creates, renames, and deletes them. No re-auth
-on switch — the room passphrase covers every canvas.
+A joined board/room holds **many canvases**; the canvas switcher
+(`canvas-bar.svelte`) switches between them, creates, renames, and deletes them.
+No re-auth on switch — the room passphrase covers every canvas.
+
+- **UI:** the switcher is a shadcn `DropdownMenu` (see `./frontend-ui.md`) sitting
+  in a shared centred top bar next to the camera controls — both are wrapped by one
+  centred container in `App.svelte` (each bar is just its pill; positioning lives in
+  the wrapper). Trigger shows the active canvas name; the menu lists canvases
+  (switch), with per-row inline rename (pencil) + delete (trash), and a "New canvas"
+  item. User-facing term is **"Canvas N"** (`defaultCanvasName`); internally still
+  `canvases`/`canvas_id`.
+- **Per-canvas camera memory:** switching remembers each canvas's pan/zoom
+  (`cameraByCanvas` in `canvases.svelte.ts`, keyed by canvas id). `switchCanvas`/
+  `createCanvas` snapshot the outgoing view (`readCamera`), and `applyCanvasState`
+  restores the incoming one (`setCamera`, instant) if we've framed it before — else
+  the camera is left as-is. It's **in-memory per tab** (lost on reload), matching
+  that the camera itself is never synced. `readCamera`/`setCamera` are thin exports
+  over `board_tools`' `applyCamera` funnel (so the zoom indicator + selection chrome
+  stay in sync).
 
 - **State:** `cmState.canvases` (the list) + `cmState.activeCanvasId` live on
   `ConnectionManager` — reactive UI chrome that drives the bar, **not** the canvas
